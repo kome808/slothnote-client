@@ -1,0 +1,16 @@
+{
+  "properties": {
+    "title": "標題",
+    "url": "原始連結",
+    "source": "來源",
+    "summary": "摘要",
+    "category": "分類",
+    "tags": "標籤",
+    "importance": "重要性",
+    "collectedAt": "收集日期",
+    "status": "狀態",
+    "insight": "AI 洞察"
+  },
+  "databaseId": "30c49ebf-3863-812d-a436-d3ef73c8eb27",
+  "parentPageId": "30c49ebf386380ba9fb7f8305a1599ea"
+}
