@@ -1,4 +1,4 @@
-# NoteFlow Agent Rules
+# SlothNote Agent Rules
 
 ## Natural Trigger
 

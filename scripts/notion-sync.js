@@ -46,9 +46,15 @@ function loadDataSourceId() {
 let notionDatabaseId = loadDatabaseId();
 let notionDataSourceId = loadDataSourceId();
 let runtimeParentPageId = "";
+let useDataSource = Boolean(notionDataSourceId && !isPlaceholder(notionDataSourceId));
 
 function isPlaceholder(value) {
   return !value || String(value).includes("replace-with-");
+}
+
+function shouldDisableDataSource(error) {
+  const msg = String(error?.message || "");
+  return msg.includes("Notion API 404") && (msg.includes("data source") || msg.includes("Could not find"));
 }
 
 async function loadRuntimeNotionConfigFromWorker() {
@@ -79,6 +85,7 @@ async function loadRuntimeNotionConfigFromWorker() {
   }
   if (payload.dataSourceId) {
     notionDataSourceId = payload.dataSourceId;
+    useDataSource = true;
   }
   if (payload.parentPageId) {
     runtimeParentPageId = payload.parentPageId;
@@ -224,15 +231,24 @@ async function findPageByUrl(url) {
   if (!url) return null;
 
   // 2025-09-03 升級路徑：優先支援 data_source 查詢
-  if (notionDataSourceId) {
-    const result = await notionRequest(`data_sources/${notionDataSourceId}/query`, "POST", {
-      filter: {
-        property: "原始連結",
-        url: { equals: url },
-      },
-      page_size: 1,
-    }, { version: MODERN_NOTION_VERSION });
-    return result.results?.[0] || null;
+  if (useDataSource && notionDataSourceId) {
+    try {
+      const result = await notionRequest(`data_sources/${notionDataSourceId}/query`, "POST", {
+        filter: {
+          property: "原始連結",
+          url: { equals: url },
+        },
+        page_size: 1,
+      }, { version: MODERN_NOTION_VERSION });
+      return result.results?.[0] || null;
+    } catch (error) {
+      if (shouldDisableDataSource(error)) {
+        useDataSource = false;
+        console.warn("⚠️ data_source_id 無效，已自動改用 database_id 同步。");
+      } else {
+        throw error;
+      }
+    }
   }
 
   const result = await notionRequest(`databases/${notionDatabaseId}/query`, "POST", {
@@ -333,7 +349,7 @@ function buildPagePayload(frontmatter, body) {
   const tags = Array.isArray(frontmatter.tags) ? frontmatter.tags : [];
   const categoryName = frontmatter.category_zh || frontmatter.category || "未分類";
 
-  const parent = notionDataSourceId
+  const parent = useDataSource && notionDataSourceId
     ? { data_source_id: notionDataSourceId }
     : { database_id: notionDatabaseId };
 

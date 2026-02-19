@@ -28,9 +28,15 @@ const mapping = loadMapping();
 let databaseId = process.env.NOTION_DATABASE_ID || mapping.databaseId;
 let dataSourceId = process.env.NOTION_DATA_SOURCE_ID || mapping.dataSourceId || "";
 let parentPageId = process.env.NOTION_PARENT_PAGE_ID || mapping.parentPageId || "";
+let useDataSource = Boolean(dataSourceId && !isPlaceholder(dataSourceId));
 
 function isPlaceholder(value) {
   return !value || String(value).includes("replace-with-");
+}
+
+function shouldDisableDataSource(error) {
+  const msg = String(error?.message || "");
+  return msg.includes("Notion API 404") && (msg.includes("data source") || msg.includes("Could not find"));
 }
 
 async function loadRuntimeConfigFromWorker() {
@@ -49,7 +55,10 @@ async function loadRuntimeConfigFromWorker() {
   const payload = await response.json();
   if (payload.notionToken) notionToken = payload.notionToken;
   if (payload.databaseId) databaseId = payload.databaseId;
-  if (payload.dataSourceId) dataSourceId = payload.dataSourceId;
+  if (payload.dataSourceId) {
+    dataSourceId = payload.dataSourceId;
+    useDataSource = true;
+  }
   if (payload.parentPageId) parentPageId = payload.parentPageId;
 }
 
@@ -170,11 +179,24 @@ async function queryAllNotes() {
       ...(nextCursor ? { start_cursor: nextCursor } : {}),
     };
 
-    const result = dataSourceId
-      ? await notionRequest(`data_sources/${dataSourceId}/query`, "POST", body, {
+    let result;
+    if (useDataSource && dataSourceId) {
+      try {
+        result = await notionRequest(`data_sources/${dataSourceId}/query`, "POST", body, {
           version: MODERN_NOTION_VERSION,
-        })
-      : await notionRequest(`databases/${databaseId}/query`, "POST", body);
+        });
+      } catch (error) {
+        if (shouldDisableDataSource(error)) {
+          useDataSource = false;
+          console.warn("⚠️ data_source_id 無效，分類頁刷新改用 database_id。");
+          result = await notionRequest(`databases/${databaseId}/query`, "POST", body);
+        } else {
+          throw error;
+        }
+      }
+    } else {
+      result = await notionRequest(`databases/${databaseId}/query`, "POST", body);
+    }
 
     notes.push(...(result.results || []));
     hasMore = Boolean(result.has_more);

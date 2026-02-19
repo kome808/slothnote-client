@@ -61,7 +61,7 @@ async function claimSetup(workerBaseUrl, pairCode) {
 }
 
 async function main() {
-  console.log("=== NoteFlow 開始設定 ===");
+  console.log("=== SlothNote 開始設定 ===");
 
   if (!fs.existsSync(ENV_EXAMPLE)) {
     console.error("❌ 找不到 .env.example，請確認你在專案根目錄執行。");

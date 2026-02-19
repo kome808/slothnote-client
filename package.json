@@ -1,7 +1,7 @@
 {
     "name": "noteflow",
     "version": "1.0.0",
-    "description": "NoteFlow - AI 智慧知識管理工具",
+    "description": "SlothNote - AI 智慧知識管理工具",
     "scripts": {
         "setup:start": "node scripts/start-setup.js",
         "check:secrets": "node scripts/check-secrets.js --all",
