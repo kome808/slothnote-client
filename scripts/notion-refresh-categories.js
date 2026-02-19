@@ -108,12 +108,20 @@ async function findOrCreateChildPage(parentId, title) {
 async function archiveAllChildren(pageId) {
   const children = await notionRequest(`blocks/${pageId}/children?page_size=100`, "GET");
   for (const block of children.results || []) {
+    if (block.type === "child_page") {
+      await notionRequest(`pages/${block.id}`, "PATCH", { archived: true });
+      continue;
+    }
     await notionRequest(`blocks/${block.id}`, "PATCH", { archived: true });
   }
 }
 
 async function archiveBlock(blockId) {
-  await notionRequest(`blocks/${blockId}`, "PATCH", { archived: true });
+  try {
+    await notionRequest(`pages/${blockId}`, "PATCH", { archived: true });
+  } catch {
+    await notionRequest(`blocks/${blockId}`, "PATCH", { archived: true });
+  }
 }
 
 async function appendChildren(pageId, children) {
