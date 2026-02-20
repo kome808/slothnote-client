@@ -108,6 +108,16 @@ async function findOrCreateChildPage(parentId, title) {
   return created.id;
 }
 
+async function updatePageTitle(pageId, title) {
+  await notionRequest(`pages/${pageId}`, "PATCH", {
+    properties: {
+      title: {
+        title: [{ type: "text", text: { content: title } }],
+      },
+    },
+  });
+}
+
 async function archiveAllChildren(pageId) {
   const children = await notionRequest(`blocks/${pageId}/children?page_size=100`, "GET");
   for (const block of children.results || []) {
@@ -488,7 +498,7 @@ async function updateCategoryPage(pageId, categoryName, rows) {
     : "目前沒有文章";
 
   const header = [
-    makeHeading(`分類：${categoryName}`),
+    makeHeading(`分類：${categoryName}（${rows.length}）`),
     makeParagraph(`資料筆數：${rows.length}`),
     makeParagraph(`更新內容：${updateSummary}`),
     ...buildCategoryInsightBlocks(rows),
@@ -525,6 +535,14 @@ async function findChildPageByTitle(parentId, title) {
   return children.find((b) => (b.child_page?.title || "").trim() === title) || null;
 }
 
+async function findCategoryPageByBaseName(parentId, categoryName) {
+  const children = await listChildPageBlocks(parentId);
+  return (
+    children.find((b) => normalizeCategoryPageTitle(b.child_page?.title || "") === categoryName) ||
+    null
+  );
+}
+
 async function main() {
   await loadRuntimeConfigFromWorker();
 
@@ -554,12 +572,21 @@ async function main() {
   const categoryNames = [...categoryMap.keys()].sort((a, b) => a.localeCompare(b, "zh-Hant"));
 
   for (const categoryName of categoryNames) {
-    const pageId = await findOrCreateChildPage(parentPageId, categoryName);
+    const rows = categoryMap.get(categoryName) || [];
+    const pageTitle = `${categoryName}（${rows.length}）`;
+    const existingCategoryPage = await findCategoryPageByBaseName(parentPageId, categoryName);
+    const pageId = existingCategoryPage
+      ? existingCategoryPage.id
+      : await findOrCreateChildPage(parentPageId, pageTitle);
+
+    if (existingCategoryPage && (existingCategoryPage.child_page?.title || "") !== pageTitle) {
+      await updatePageTitle(pageId, pageTitle);
+    }
+
     const legacyTablePage = await findChildPageByTitle(parentPageId, `${categoryName}（表格）`);
     if (legacyTablePage) {
       await archiveBlock(legacyTablePage.id);
     }
-    const rows = categoryMap.get(categoryName) || [];
     await updateCategoryPage(pageId, categoryName, rows);
   }
 
