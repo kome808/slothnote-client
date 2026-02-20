@@ -251,6 +251,27 @@ function isHttpUrl(value) {
   return /^https?:\/\//i.test(String(value || ""));
 }
 
+function normalizeTags(input) {
+  if (Array.isArray(input)) return input.map((t) => String(t || "").trim()).filter(Boolean);
+  if (typeof input === "string") {
+    return input.split(/[，,|]/).map((t) => t.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+function resolveOriginalUrl(frontmatter) {
+  const candidates = [
+    frontmatter.url,
+    frontmatter.original_url,
+    frontmatter.originalUrl,
+    frontmatter.link,
+  ];
+  for (const c of candidates) {
+    if (/^https?:\/\//i.test(String(c || "").trim())) return String(c).trim();
+  }
+  return "";
+}
+
 function resolveCoverImage(frontmatter) {
   const candidates = [
     frontmatter.cover_image,
@@ -423,9 +444,10 @@ async function replaceFullContentSection(pageId, body) {
 
 function buildPagePayload(frontmatter, body) {
   const summary = extractSection(body, "一句話摘要");
-  const insight = extractSection(body, "AI 洞察");
+  const insightRaw = extractSection(body, "AI 洞察") || extractSection(body, "AI洞察");
+  const insight = insightRaw || (summary ? `延伸自摘要：${summary}` : "");
   const title = frontmatter.title || "未命名筆記";
-  const tags = Array.isArray(frontmatter.tags) ? frontmatter.tags : [];
+  const tags = normalizeTags(frontmatter.tags);
   const categoryName = normalizeChineseCategoryName(frontmatter.category_zh || frontmatter.category || "未分類");
   const coverImage = resolveCoverImage(frontmatter);
 
@@ -441,7 +463,7 @@ function buildPagePayload(frontmatter, body) {
       "標題": {
         title: [{ text: { content: String(title).slice(0, 2000) } }],
       },
-      "原始連結": { url: frontmatter.url || null },
+      "原始連結": { url: resolveOriginalUrl(frontmatter) || null },
       "來源": { select: { name: frontmatter.source || "web" } },
       "摘要": {
         rich_text: summary
@@ -452,7 +474,6 @@ function buildPagePayload(frontmatter, body) {
       "標籤": {
         multi_select: tags.map((tag) => ({ name: String(tag).slice(0, 100) })),
       },
-      "重要性": { select: { name: normalizeImportance(frontmatter.importance) } },
       "收集日期": { date: { start: String(frontmatter.date || "").slice(0, 10) || null } },
       "狀態": { select: { name: normalizeStatus(frontmatter.status) } },
       "AI 洞察": {
@@ -471,8 +492,14 @@ async function syncFile(filePath) {
 
   if (frontmatter.notion_synced === true) {
     if (existing) {
+      // 即使本地已標記同步，也要回填屬性，修復 Notion 空欄位與舊資料結構。
+      const payload = buildPagePayload(frontmatter, body);
+      await notionRequest(`pages/${existing.id}`, "PATCH", {
+        properties: payload.properties,
+        ...(payload.cover ? { cover: payload.cover } : {}),
+      });
       await replaceFullContentSection(existing.id, body);
-      return { skipped: true, filePath };
+      return { skipped: false, filePath, updated: true, backfilled: true };
     }
     // 本地已標記同步但遠端不存在時，自動補建以修復數量不一致。
     const payload = buildPagePayload(frontmatter, body);
@@ -540,7 +567,7 @@ async function main() {
       continue;
     }
     synced += 1;
-    const action = result.repaired ? "補建" : (result.updated ? "更新" : "建立");
+    const action = result.repaired ? "補建" : (result.backfilled ? "回填" : (result.updated ? "更新" : "建立"));
     console.log(`✅ ${action} Notion 頁面：${path.relative(ROOT, result.filePath)}`);
   }
 

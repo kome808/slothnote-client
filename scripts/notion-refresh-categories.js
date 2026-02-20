@@ -17,7 +17,7 @@ const MAPPING_PATH = path.join(ROOT, "config", "notion-mapping.json");
 const LEGACY_NOTION_VERSION = "2022-06-28";
 const MODERN_NOTION_VERSION = "2025-09-03";
 const MAX_PER_CATEGORY_ROWS = 120;
-const CATEGORY_LAYOUT = String(process.env.NOTION_CATEGORY_LAYOUT || "table").toLowerCase();
+const CATEGORY_LAYOUT = String(process.env.NOTION_CATEGORY_LAYOUT || "table").toLowerCase(); // table | visual
 
 let notionToken = process.env.NOTION_TOKEN || "";
 
@@ -456,21 +456,13 @@ async function updateCategoryPage(pageId, categoryName, rows) {
     makeParagraph(`資料筆數：${rows.length}`),
     makeParagraph(`更新內容：${updateSummary}`),
     ...buildCategoryInsightBlocks(rows),
-    makeParagraph(`版型：${CATEGORY_LAYOUT === "visual" ? "圖像式" : (CATEGORY_LAYOUT === "list" ? "條列式" : "表格式")}`),
+    makeParagraph(`版型：${CATEGORY_LAYOUT === "visual" ? "圖像式" : "表格式"}`),
   ];
 
   await appendChildren(pageId, header);
 
   if (CATEGORY_LAYOUT === "visual") {
     await appendChildren(pageId, buildVisualLayoutBlocks(rows));
-    return updateSummary;
-  }
-
-  if (CATEGORY_LAYOUT === "list") {
-    await appendChildren(pageId, [
-      makeParagraph("以下用條列列出本分類文章（自動更新）"),
-      ...buildListLayoutBlocks(rows),
-    ]);
     return updateSummary;
   }
 
