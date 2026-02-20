@@ -31,22 +31,22 @@
 2. 讀取 `notes/_pending.json`。
 3. 若清單有連結：逐篇整理（擷取內容、摘要、分類、關聯洞察）並寫入 `notes/{category}/YYYY-MM-DD-{slug}.md`。
 4. 若清單為空：不要結束，必須繼續執行補齊流程。
-5. 執行 `npm run reconcile:notion`（固定必跑）。
+5. 執行 `npm run reconcile:notion`（固定必跑，快速同步模式）。
 6. 若第 3 步有新連結被處理，再執行 `node scripts/mark-done.js`；沒有新連結則略過。
 7. 回覆本次整理結果（篇數、分類、失敗項目）。
 
 ### 同步補齊模式（`同步筆記` / `再次同步`）
 
-1. 直接執行 `npm run reconcile:notion`。
+1. 直接執行 `npm run reconcile:notion`（快速同步模式）。
 2. 僅回報 Notion 補齊與修復結果。
 3. 禁止執行 `node scripts/mark-done.js`。
 
 ## 強制規則
 
 - 禁止只回覆「目前沒有待整理連結」就結束任務。
-- 只要使用者輸入「整理筆記」，就必須完成本機↔Notion 一致性補齊。
+- 只要使用者輸入「整理筆記」，就必須完成本機已整理筆記的 Notion 同步。
 - 只有在「已確認筆記檔案成功寫入 notes/」後，才能執行 `node scripts/mark-done.js`。
-- 使用者輸入「同步筆記」或「再次同步」時，禁止拉取/標記雲端待處理狀態，只允許做 Notion 補齊。
+- 使用者輸入「同步筆記」或「再次同步」時，禁止拉取/標記雲端待處理狀態，只允許做 Notion 同步。
 
 ## Token 節省規則（摘要優先）
 

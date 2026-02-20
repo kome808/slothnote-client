@@ -10,7 +10,6 @@ const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
 const MAX_RICH_TEXT = 1800;
-const MAX_BLOCKS = 500;
 const LEGACY_NOTION_VERSION = "2022-06-28";
 const MODERN_NOTION_VERSION = "2025-09-03";
 
@@ -47,6 +46,8 @@ let notionDatabaseId = loadDatabaseId();
 let notionDataSourceId = loadDataSourceId();
 let runtimeParentPageId = "";
 let useDataSource = Boolean(notionDataSourceId && !isPlaceholder(notionDataSourceId));
+const FULL_RECONCILE = process.env.NOTION_FULL_RECONCILE === "1";
+const RECREATE_MISSING = process.env.NOTION_RECREATE_MISSING === "1";
 
 function isPlaceholder(value) {
   return !value || String(value).includes("replace-with-");
@@ -379,7 +380,6 @@ function buildContentBlocks(body) {
   const blocks = [makeBlock("heading_2", "全文內容")];
 
   for (const rawLine of lines) {
-    if (blocks.length >= MAX_BLOCKS) break;
     const line = rawLine.trim();
     if (!line) continue;
 
@@ -406,11 +406,6 @@ function buildContentBlocks(body) {
 
     blocks.push(makeBlock("paragraph", line));
   }
-
-  if (blocks.length >= MAX_BLOCKS) {
-    blocks.push(makeBlock("paragraph", "（內容較長，已於同步時截斷）"));
-  }
-
   return blocks;
 }
 
@@ -493,11 +488,15 @@ function buildPagePayload(frontmatter, body) {
 async function syncFile(filePath) {
   const raw = fs.readFileSync(filePath, "utf8");
   const { frontmatter, body } = parseFrontmatter(raw);
-  const existing = await findPageByUrl(frontmatter.url);
+  const originalUrl = resolveOriginalUrl(frontmatter);
+  const existing = await findPageByUrl(originalUrl);
 
   if (frontmatter.notion_synced === true) {
+    if (!FULL_RECONCILE) {
+      return { skipped: true, filePath, reason: "already_synced" };
+    }
+
     if (existing) {
-      // 即使本地已標記同步，也要回填屬性，修復 Notion 空欄位與舊資料結構。
       const payload = buildPagePayload(frontmatter, body);
       await notionRequest(`pages/${existing.id}`, "PATCH", {
         properties: payload.properties,
@@ -506,7 +505,11 @@ async function syncFile(filePath) {
       await replaceFullContentSection(existing.id, body);
       return { skipped: false, filePath, updated: true, backfilled: true };
     }
-    // 本地已標記同步但遠端不存在時，自動補建以修復數量不一致。
+
+    if (!RECREATE_MISSING) {
+      return { skipped: true, filePath, reason: "missing_remote_skip_recreate" };
+    }
+
     const payload = buildPagePayload(frontmatter, body);
     await notionRequest("pages", "POST", payload);
     return { skipped: false, filePath, updated: false, repaired: true };
@@ -562,6 +565,9 @@ async function main() {
   }
 
   console.log(`🔄 準備檢查 ${files.length} 份筆記...`);
+  if (!FULL_RECONCILE) {
+    console.log("ℹ️ 目前為快速同步模式：只處理 notion_synced=false 的筆記");
+  }
 
   let synced = 0;
   let skipped = 0;
@@ -587,6 +593,9 @@ async function main() {
 
     if (result.skipped) {
       skipped += 1;
+      if (result.reason === "missing_remote_skip_recreate") {
+        console.log(`⏭️ 已略過遠端已刪除筆記（不自動重建）：${path.relative(ROOT, file)}`);
+      }
       continue;
     }
     synced += 1;

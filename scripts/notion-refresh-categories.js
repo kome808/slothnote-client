@@ -16,9 +16,8 @@ const ROOT = path.join(__dirname, "..");
 const MAPPING_PATH = path.join(ROOT, "config", "notion-mapping.json");
 const LEGACY_NOTION_VERSION = "2022-06-28";
 const MODERN_NOTION_VERSION = "2025-09-03";
-const MAX_PER_CATEGORY_ROWS = 120;
+const MAX_PER_CATEGORY_ROWS = 200;
 const CATEGORY_PAGE_SIZE = 20;
-const DEFAULT_CATEGORY_LAYOUT = "visual";
 
 let notionToken = process.env.NOTION_TOKEN || "";
 
@@ -164,12 +163,21 @@ function getSummary(page) {
   return text;
 }
 
-function getCoverImage(page) {
-  const cover = page?.cover;
-  if (!cover) return "";
-  if (cover.type === "external") return cover.external?.url || "";
-  if (cover.type === "file") return cover.file?.url || "";
-  return "";
+
+function getAiInsight(page) {
+  const richText = page?.properties?.["AI 洞察"]?.rich_text;
+  if (!Array.isArray(richText)) return "";
+  return richText.map((t) => t.plain_text || "").join("").trim();
+}
+
+function getTags(page) {
+  const tags = page?.properties?.["標籤"]?.multi_select;
+  if (!Array.isArray(tags)) return "";
+  return tags.map((t) => String(t.name || "").trim()).filter(Boolean).join("、");
+}
+
+function getStatus(page) {
+  return page?.properties?.["狀態"]?.select?.name || "";
 }
 
 function notionPageUrlFromId(id) {
@@ -342,11 +350,12 @@ function buildCategoryMap(notes) {
       id: note.id,
       title: getTitleFromPage(note),
       url: note.url || notionPageUrlFromId(note.id),
-      originalUrl: note?.properties?.["原始連結"]?.url || "",
       source: note?.properties?.["來源"]?.select?.name || "web",
       collectionDate: getCollectionDate(note),
+      aiInsight: getAiInsight(note),
       summary: getSummary(note),
-      coverImage: getCoverImage(note),
+      tags: getTags(note),
+      status: getStatus(note),
     };
 
     const categoryNames = getCategoryNames(note);
@@ -385,19 +394,6 @@ function makeParagraph(text) {
   };
 }
 
-function makeLayoutSwitchBlock(layout, targetUrl) {
-  if (!targetUrl) return makeParagraph("切換連結暫時不可用");
-  const label = layout === "visual" ? "切換到表格式" : "切換到圖像式";
-  return {
-    object: "block",
-    type: "callout",
-    callout: {
-      rich_text: [textItem(label, targetUrl)],
-      icon: { type: "emoji", emoji: "🔁" },
-    },
-  };
-}
-
 function makeHeading(text) {
   return {
     object: "block",
@@ -418,17 +414,6 @@ function makeBulletedItem(text, link = null) {
   };
 }
 
-function makeImageBlock(url, caption = "") {
-  return {
-    object: "block",
-    type: "image",
-    image: {
-      type: "external",
-      external: { url },
-      caption: caption ? [textItem(caption)] : [],
-    },
-  };
-}
 
 function makeTableBlock(tableWidth, rows = []) {
   return {
@@ -486,26 +471,6 @@ function truncateText(text, max = 44) {
   return input.length > max ? `${input.slice(0, max)}…` : input;
 }
 
-function buildListLayoutBlocks(rows) {
-  if (!rows.length) return [makeParagraph("目前沒有文章。")];
-  return rows.slice(0, MAX_PER_CATEGORY_ROWS).map((row) =>
-    makeBulletedItem(`${row.collectionDate || ""}｜${row.source || "web"}｜${truncateText(row.title, 48)}`, row.url)
-  );
-}
-
-function buildVisualLayoutBlocks(rows) {
-  if (!rows.length) return [makeParagraph("目前沒有文章。")];
-  const blocks = [];
-  for (const row of rows) {
-    blocks.push(makeHeading(truncateText(row.title, 60)));
-    if (row.coverImage) blocks.push(makeImageBlock(row.coverImage, "文章封面"));
-    blocks.push(makeParagraph(`日期：${row.collectionDate || ""}｜來源：${row.source || "web"}`));
-    if (row.summary) blocks.push(makeParagraph(`摘要：${truncateText(row.summary, 120)}`));
-    blocks.push(makeParagraph(`原文：${row.originalUrl || row.url || ""}`));
-  }
-  return blocks;
-}
-
 async function appendTablePage(pageId, tableWidth, headerRow, dataRows, pageNo, totalPages) {
   const blocks = [
     {
@@ -519,7 +484,7 @@ async function appendTablePage(pageId, tableWidth, headerRow, dataRows, pageNo, 
   await appendChildren(pageId, blocks);
 }
 
-async function updateCategoryPage(pageId, categoryName, rows, layout, switchTargetUrl) {
+async function updateCategoryPage(pageId, categoryName, rows) {
   await archiveAllChildren(pageId);
 
   const latest = rows[0] || null;
@@ -532,8 +497,6 @@ async function updateCategoryPage(pageId, categoryName, rows, layout, switchTarg
     makeParagraph(`資料筆數：${rows.length}`),
     makeParagraph(`更新內容：${updateSummary}`),
     ...buildCategoryInsightBlocks(rows),
-    makeParagraph(`版型：${layout === "visual" ? "圖像式" : "表格式"}`),
-    makeLayoutSwitchBlock(layout, switchTargetUrl),
   ];
 
   await appendChildren(pageId, header);
@@ -541,38 +504,24 @@ async function updateCategoryPage(pageId, categoryName, rows, layout, switchTarg
   const limitedRows = rows.slice(0, MAX_PER_CATEGORY_ROWS);
   const pages = chunkRows(limitedRows, CATEGORY_PAGE_SIZE);
 
-  if (layout === "visual") {
-    await appendChildren(pageId, [makeParagraph("以下用圖像卡片分頁列出本分類文章（每頁 20 筆）")]);
-    for (let i = 0; i < pages.length; i += 1) {
-      const pageRows = pages[i];
-      const pageNo = i + 1;
-      await appendChildren(pageId, [
-        {
-          object: "block",
-          type: "heading_3",
-          heading_3: { rich_text: [textItem(buildPaginationLabel(pageNo, pages.length))] },
-        },
-      ]);
-      await appendChildren(pageId, buildVisualLayoutBlocks(pageRows));
-    }
-    return updateSummary;
-  }
-
-  const tableHeader = makeTableRow(["標題", "收集日期", "來源", "摘要", "原文"]);
+  const tableHeader = makeTableRow(["標題", "AI 洞察", "來源", "分類", "摘要", "收集日期", "標籤", "狀態"]);
   await appendChildren(pageId, [makeParagraph("以下用表格分頁列出本分類文章（每頁 20 筆）")]);
   for (let i = 0; i < pages.length; i += 1) {
     const pageRows = pages[i];
     const tableRows = [];
     for (const row of pageRows) {
       tableRows.push(makeLinkedTableRow([
-        { text: truncateText(row.title, 42), link: row.url },
-        row.collectionDate || "",
+        { text: truncateText(row.title, 40), link: row.url },
+        truncateText(row.aiInsight, 50),
         row.source || "web",
-        truncateText(row.summary, 48),
-        { text: row.originalUrl ? "開啟" : "", link: row.originalUrl || null },
+        categoryName,
+        truncateText(row.summary, 46),
+        row.collectionDate || "",
+        truncateText(row.tags, 36),
+        row.status || "",
       ]));
     }
-    await appendTablePage(pageId, 5, tableHeader, tableRows, i + 1, pages.length);
+    await appendTablePage(pageId, 8, tableHeader, tableRows, i + 1, pages.length);
   }
   return updateSummary;
 }
@@ -611,26 +560,13 @@ async function main() {
   const categoryNames = [...categoryMap.keys()].sort((a, b) => a.localeCompare(b, "zh-Hant"));
 
   for (const categoryName of categoryNames) {
-    const visualPageId = await findOrCreateChildPage(parentPageId, categoryName);
-    const tablePageTitle = `${categoryName}（表格）`;
-    const tablePageId = await findOrCreateChildPage(parentPageId, tablePageTitle);
+    const pageId = await findOrCreateChildPage(parentPageId, categoryName);
+    const legacyTablePage = await findChildPageByTitle(parentPageId, `${categoryName}（表格）`);
+    if (legacyTablePage) {
+      await archiveBlock(legacyTablePage.id);
+    }
     const rows = categoryMap.get(categoryName) || [];
-
-    await updateCategoryPage(
-      visualPageId,
-      categoryName,
-      rows,
-      DEFAULT_CATEGORY_LAYOUT,
-      notionPageUrlFromId(tablePageId)
-    );
-
-    await updateCategoryPage(
-      tablePageId,
-      categoryName,
-      rows,
-      "table",
-      notionPageUrlFromId(visualPageId)
-    );
+    await updateCategoryPage(pageId, categoryName, rows);
   }
 
   console.log("✅ Notion 動態分類頁已更新");
