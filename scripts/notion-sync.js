@@ -57,6 +57,11 @@ function shouldDisableDataSource(error) {
   return msg.includes("Notion API 404") && (msg.includes("data source") || msg.includes("Could not find"));
 }
 
+function isDatabaseNotFoundError(error) {
+  const msg = String(error?.message || "");
+  return msg.includes("Notion API 404") && msg.includes("Could not find database with ID");
+}
+
 async function loadRuntimeNotionConfigFromWorker() {
   const workerBaseUrl = process.env.WORKER_BASE_URL || "";
   const workerApiKey = process.env.WORKER_CLIENT_API_KEY || process.env.WORKER_INTERNAL_API_KEY || "";
@@ -560,8 +565,26 @@ async function main() {
 
   let synced = 0;
   let skipped = 0;
+  let retriedAfterRefresh = false;
+
   for (const file of files) {
-    const result = await syncFile(file);
+    let result;
+    try {
+      result = await syncFile(file);
+    } catch (error) {
+      if (!retriedAfterRefresh && isDatabaseNotFoundError(error)) {
+        retriedAfterRefresh = true;
+        console.warn("⚠️ 偵測到 database_id 失效，嘗試重新讀取 Worker 綁定後重試...");
+        const reloaded = await loadRuntimeNotionConfigFromWorker();
+        if (!reloaded || isPlaceholder(notionDatabaseId)) {
+          throw error;
+        }
+        result = await syncFile(file);
+      } else {
+        throw error;
+      }
+    }
+
     if (result.skipped) {
       skipped += 1;
       continue;
