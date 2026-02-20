@@ -10,6 +10,7 @@ const readline = require("readline");
 const ROOT = path.join(__dirname, "..");
 const ENV_EXAMPLE = path.join(ROOT, ".env.example");
 const ENV_LOCAL = path.join(ROOT, ".env.local");
+const DEFAULT_WORKER_BASE_URL = "https://noteflow-worker.kome808.workers.dev";
 
 function parseEnv(content) {
   const map = new Map();
@@ -89,11 +90,12 @@ async function main() {
 
   const rl = createRl();
 
-  const workerBaseUrlDefault = envMap.get("WORKER_BASE_URL") || "https://noteflow-worker.kome808.workers.dev";
-  const workerBaseUrl = await ask(rl, `WORKER_BASE_URL [${workerBaseUrlDefault}]: `) || workerBaseUrlDefault;
+  const workerBaseUrl = (envMap.get("WORKER_BASE_URL") || DEFAULT_WORKER_BASE_URL).trim() || DEFAULT_WORKER_BASE_URL;
+  console.log(`使用服務網址：${workerBaseUrl}`);
+
   const pairCode = await ask(rl, "請輸入 LINE 顯示的配對碼（8碼）: ");
-  if (!workerBaseUrl || !pairCode) {
-    console.error("❌ WORKER_BASE_URL 與配對碼必填。");
+  if (!pairCode) {
+    console.error("❌ 配對碼必填。");
     rl.close();
     process.exit(1);
   }
