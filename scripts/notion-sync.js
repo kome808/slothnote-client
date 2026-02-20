@@ -220,6 +220,24 @@ function normalizeChineseCategoryName(input) {
   return CATEGORY_ZH_MAP[key] || "未分類";
 }
 
+function isHttpUrl(value) {
+  return /^https?:\/\//i.test(String(value || ""));
+}
+
+function resolveCoverImage(frontmatter) {
+  const candidates = [
+    frontmatter.cover_image,
+    frontmatter.coverImage,
+    frontmatter.image,
+    frontmatter.thumbnail,
+    frontmatter.og_image,
+  ];
+  for (const v of candidates) {
+    if (isHttpUrl(v)) return String(v).trim();
+  }
+  return "";
+}
+
 function extractSection(body, heading) {
   const pattern = new RegExp(`^##\\s+${heading}\\n([\\s\\S]*?)(?=^##\\s+|$)`, "m");
   const match = body.match(pattern);
@@ -382,6 +400,7 @@ function buildPagePayload(frontmatter, body) {
   const title = frontmatter.title || "未命名筆記";
   const tags = Array.isArray(frontmatter.tags) ? frontmatter.tags : [];
   const categoryName = normalizeChineseCategoryName(frontmatter.category_zh || frontmatter.category || "未分類");
+  const coverImage = resolveCoverImage(frontmatter);
 
   const parent = useDataSource && notionDataSourceId
     ? { data_source_id: notionDataSourceId }
@@ -389,6 +408,7 @@ function buildPagePayload(frontmatter, body) {
 
   return {
     parent,
+    ...(coverImage ? { cover: { type: "external", external: { url: coverImage } } } : {}),
     children: buildContentBlocks(body),
     properties: {
       "標題": {
@@ -432,7 +452,10 @@ async function syncFile(filePath) {
   const payload = buildPagePayload(frontmatter, body);
 
   if (existing) {
-    await notionRequest(`pages/${existing.id}`, "PATCH", { properties: payload.properties });
+    await notionRequest(`pages/${existing.id}`, "PATCH", {
+      properties: payload.properties,
+      ...(payload.cover ? { cover: payload.cover } : {}),
+    });
     await replaceFullContentSection(existing.id, body);
   } else {
     await notionRequest("pages", "POST", payload);

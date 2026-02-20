@@ -17,6 +17,7 @@ const MAPPING_PATH = path.join(ROOT, "config", "notion-mapping.json");
 const LEGACY_NOTION_VERSION = "2022-06-28";
 const MODERN_NOTION_VERSION = "2025-09-03";
 const MAX_PER_CATEGORY_ROWS = 120;
+const CATEGORY_LAYOUT = String(process.env.NOTION_CATEGORY_LAYOUT || "list").toLowerCase();
 
 let notionToken = process.env.NOTION_TOKEN || "";
 
@@ -162,6 +163,14 @@ function getSummary(page) {
   return text;
 }
 
+function getCoverImage(page) {
+  const cover = page?.cover;
+  if (!cover) return "";
+  if (cover.type === "external") return cover.external?.url || "";
+  if (cover.type === "file") return cover.file?.url || "";
+  return "";
+}
+
 function notionPageUrlFromId(id) {
   return `https://www.notion.so/${String(id || "").replace(/-/g, "")}`;
 }
@@ -283,6 +292,7 @@ function buildCategoryMap(notes) {
       source: note?.properties?.["來源"]?.select?.name || "web",
       collectionDate: getCollectionDate(note),
       summary: getSummary(note),
+      coverImage: getCoverImage(note),
     };
 
     const categoryNames = getCategoryNames(note);
@@ -331,6 +341,28 @@ function makeHeading(text) {
   };
 }
 
+function makeBulletedItem(text, link = null) {
+  return {
+    object: "block",
+    type: "bulleted_list_item",
+    bulleted_list_item: {
+      rich_text: [textItem(text, link)],
+    },
+  };
+}
+
+function makeImageBlock(url, caption = "") {
+  return {
+    object: "block",
+    type: "image",
+    image: {
+      type: "external",
+      external: { url },
+      caption: caption ? [textItem(caption)] : [],
+    },
+  };
+}
+
 function makeTableBlock(tableWidth, rows = []) {
   return {
     object: "block",
@@ -375,6 +407,26 @@ function truncateText(text, max = 44) {
   return input.length > max ? `${input.slice(0, max)}…` : input;
 }
 
+function buildListLayoutBlocks(rows) {
+  if (!rows.length) return [makeParagraph("目前沒有文章。")];
+  return rows.slice(0, MAX_PER_CATEGORY_ROWS).map((row) =>
+    makeBulletedItem(`${row.collectionDate || ""}｜${row.source || "web"}｜${truncateText(row.title, 48)}`, row.url)
+  );
+}
+
+function buildVisualLayoutBlocks(rows) {
+  if (!rows.length) return [makeParagraph("目前沒有文章。")];
+  const blocks = [];
+  for (const row of rows.slice(0, Math.min(MAX_PER_CATEGORY_ROWS, 30))) {
+    blocks.push(makeHeading(truncateText(row.title, 60)));
+    if (row.coverImage) blocks.push(makeImageBlock(row.coverImage, "文章封面"));
+    blocks.push(makeParagraph(`日期：${row.collectionDate || ""}｜來源：${row.source || "web"}`));
+    if (row.summary) blocks.push(makeParagraph(`摘要：${truncateText(row.summary, 120)}`));
+    blocks.push(makeParagraph(`原文：${row.originalUrl || row.url || ""}`));
+  }
+  return blocks;
+}
+
 async function appendTableBlocks(pageId, tableWidth, headerRow, dataRows) {
   const chunkSize = 80;
   const chunks = [];
@@ -404,8 +456,23 @@ async function updateCategoryPage(pageId, categoryName, rows) {
     makeParagraph(`資料筆數：${rows.length}`),
     makeParagraph(`更新內容：${updateSummary}`),
     ...buildCategoryInsightBlocks(rows),
-    makeParagraph("以下用表格列出本分類文章（自動更新）"),
+    makeParagraph(`版型：${CATEGORY_LAYOUT === "visual" ? "圖像式" : "條列式"}`),
   ];
+
+  await appendChildren(pageId, header);
+
+  if (CATEGORY_LAYOUT === "visual") {
+    await appendChildren(pageId, buildVisualLayoutBlocks(rows));
+    return updateSummary;
+  }
+
+  if (CATEGORY_LAYOUT === "list") {
+    await appendChildren(pageId, [
+      makeParagraph("以下用條列列出本分類文章（自動更新）"),
+      ...buildListLayoutBlocks(rows),
+    ]);
+    return updateSummary;
+  }
 
   const tableHeader = makeTableRow(["標題", "收集日期", "來源", "摘要", "原文"]);
   const tableRows = [];
@@ -419,24 +486,8 @@ async function updateCategoryPage(pageId, categoryName, rows) {
     ]));
   }
 
-  if (rows.length > MAX_PER_CATEGORY_ROWS) {
-    header.push(makeParagraph(`僅顯示前 ${MAX_PER_CATEGORY_ROWS} 筆，請至「知識收集庫」查看完整資料。`));
-  }
-
-  await appendChildren(pageId, header);
-  try {
-    await appendTableBlocks(pageId, 5, tableHeader, tableRows);
-  } catch (error) {
-    await appendChildren(
-      pageId,
-      [
-        makeParagraph("（表格建立失敗，已改用清單顯示）"),
-        ...rows.slice(0, MAX_PER_CATEGORY_ROWS).map((row) =>
-          makeParagraph(`${row.collectionDate}｜${row.source}｜${truncateText(row.title, 42)}`)
-        ),
-      ]
-    );
-  }
+  await appendChildren(pageId, [makeParagraph("以下用表格列出本分類文章（自動更新）")]);
+  await appendTableBlocks(pageId, 5, tableHeader, tableRows);
   return updateSummary;
 }
 
