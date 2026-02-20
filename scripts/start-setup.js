@@ -47,6 +47,21 @@ function ask(rl, question) {
   return new Promise((resolve) => rl.question(question, (ans) => resolve(ans.trim())));
 }
 
+function isPlaceholder(value) {
+  return !value || String(value).includes("replace-with-");
+}
+
+function cleanupOptionalNotionPlaceholders(envMap) {
+  const optionalKeys = ["NOTION_TOKEN", "NOTION_DATABASE_ID", "NOTION_DATA_SOURCE_ID"];
+  for (const key of optionalKeys) {
+    if (!envMap.has(key)) continue;
+    const value = envMap.get(key);
+    if (isPlaceholder(value)) {
+      envMap.delete(key);
+    }
+  }
+}
+
 async function claimSetup(workerBaseUrl, pairCode) {
   const response = await fetch(`${workerBaseUrl.replace(/\/$/, "")}/setup/claim`, {
     method: "POST",
@@ -97,6 +112,7 @@ async function main() {
   envMap.set("WORKER_BASE_URL", claimed.workerBaseUrl || workerBaseUrl);
   envMap.set("WORKER_INTERNAL_API_KEY", claimed.workerInternalApiKey || "");
   envMap.set("LINE_USER_ID", claimed.lineUserId || "");
+  cleanupOptionalNotionPlaceholders(envMap);
 
   fs.writeFileSync(ENV_LOCAL, serializeEnv(envMap), "utf8");
   rl.close();
