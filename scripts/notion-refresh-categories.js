@@ -162,9 +162,68 @@ function getSummary(page) {
   return text;
 }
 
+function notionPageUrlFromId(id) {
+  return `https://www.notion.so/${String(id || "").replace(/-/g, "")}`;
+}
+
+const CATEGORY_ZH_MAP = {
+  "ai-trends": "AI 趨勢",
+  development: "開發實作",
+  "product-design": "產品設計",
+  "business-strategy": "商業策略",
+  "career-growth": "職涯發展",
+  web: "網頁與內容",
+  uncategorized: "未分類",
+};
+
 function normalizeCategoryName(name) {
   const out = String(name || "").replace(/\s+/g, " ").trim();
-  return out || "未分類";
+  if (!out) return "未分類";
+  if (/[\u3400-\u9fff]/.test(out)) return out;
+  const key = out.toLowerCase().replace(/\s+/g, "-");
+  return CATEGORY_ZH_MAP[key] || "未分類";
+}
+
+function buildCategoryInsightBlocks(rows) {
+  if (!rows.length) {
+    return [makeParagraph("目前尚無內容，待新文章同步後再產生洞察。")];
+  }
+
+  const sourceCount = new Map();
+  const titleTokens = new Map();
+  const stopwords = new Set(["的", "與", "和", "在", "是", "了", "及", "並", "to", "for", "and", "the", "a", "an"]);
+
+  for (const row of rows) {
+    const source = String(row.source || "web");
+    sourceCount.set(source, (sourceCount.get(source) || 0) + 1);
+
+    const tokens = String(row.title || "")
+      .toLowerCase()
+      .replace(/[^\u3400-\u9fffa-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter((t) => t && t.length >= 2 && !stopwords.has(t));
+    for (const token of tokens) {
+      titleTokens.set(token, (titleTokens.get(token) || 0) + 1);
+    }
+  }
+
+  const topSource = [...sourceCount.entries()].sort((a, b) => b[1] - a[1])[0];
+  const hotTopics = [...titleTokens.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([name]) => name);
+
+  const newest = rows.slice(0, 3).map((r) => `- ${r.collectionDate}：${truncateText(r.title, 32)}`);
+
+  const blocks = [
+    makeHeading("分類整合洞察"),
+    makeParagraph(`近期待關注：本分類共 ${rows.length} 篇，最近更新為 ${rows[0].collectionDate || "未知日期"}。`),
+    makeParagraph(topSource ? `來源分佈：${topSource[0]} 佔比最高（${topSource[1]} 篇）。` : "來源分佈：目前資料不足。"),
+    makeParagraph(hotTopics.length ? `高頻主題詞：${hotTopics.join("、")}` : "高頻主題詞：目前資料不足。"),
+    makeParagraph(`近期文章：\n${newest.join("\n")}`),
+  ];
+
+  return blocks;
 }
 
 function sortByDateDesc(a, b) {
@@ -344,6 +403,7 @@ async function updateCategoryPage(pageId, categoryName, rows) {
     makeHeading(`分類：${categoryName}`),
     makeParagraph(`資料筆數：${rows.length}`),
     makeParagraph(`更新內容：${updateSummary}`),
+    ...buildCategoryInsightBlocks(rows),
     makeParagraph("以下用表格列出本分類文章（自動更新）"),
   ];
 

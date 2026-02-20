@@ -10,7 +10,7 @@ const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
 const MAX_RICH_TEXT = 1800;
-const MAX_BLOCKS = 90;
+const MAX_BLOCKS = 500;
 const LEGACY_NOTION_VERSION = "2022-06-28";
 const MODERN_NOTION_VERSION = "2025-09-03";
 
@@ -202,6 +202,24 @@ function normalizeImportance(importance) {
   return "⭐".repeat(n);
 }
 
+const CATEGORY_ZH_MAP = {
+  "ai-trends": "AI 趨勢",
+  development: "開發實作",
+  "product-design": "產品設計",
+  "business-strategy": "商業策略",
+  "career-growth": "職涯發展",
+  web: "網頁與內容",
+  uncategorized: "未分類",
+};
+
+function normalizeChineseCategoryName(input) {
+  const raw = String(input || "").trim();
+  if (!raw) return "未分類";
+  if (/[㐀-鿿]/.test(raw)) return raw;
+  const key = raw.toLowerCase().replace(/s+/g, "-");
+  return CATEGORY_ZH_MAP[key] || "未分類";
+}
+
 function extractSection(body, heading) {
   const pattern = new RegExp(`^##\\s+${heading}\\n([\\s\\S]*?)(?=^##\\s+|$)`, "m");
   const match = body.match(pattern);
@@ -335,12 +353,27 @@ async function pageHasFullContentSection(pageId) {
   });
 }
 
-async function appendFullContentIfMissing(pageId, body) {
-  const exists = await pageHasFullContentSection(pageId);
-  if (exists) return;
-  await notionRequest(`blocks/${pageId}/children`, "PATCH", {
-    children: buildContentBlocks(body),
+async function replaceFullContentSection(pageId, body) {
+  const list = await notionRequest(`blocks/${pageId}/children?page_size=100`, "GET");
+  const children = list.results || [];
+  const startIndex = children.findIndex((block) => {
+    if (block.type !== "heading_2") return false;
+    const text = block.heading_2?.rich_text?.map((t) => t.plain_text).join("") || "";
+    return text.trim() === "全文內容";
   });
+
+  if (startIndex >= 0) {
+    for (let i = startIndex; i < children.length; i += 1) {
+      await notionRequest(`blocks/${children[i].id}`, "PATCH", { archived: true });
+    }
+  }
+
+  const blocks = buildContentBlocks(body);
+  for (let i = 0; i < blocks.length; i += 80) {
+    await notionRequest(`blocks/${pageId}/children`, "PATCH", {
+      children: blocks.slice(i, i + 80),
+    });
+  }
 }
 
 function buildPagePayload(frontmatter, body) {
@@ -348,7 +381,7 @@ function buildPagePayload(frontmatter, body) {
   const insight = extractSection(body, "AI 洞察");
   const title = frontmatter.title || "未命名筆記";
   const tags = Array.isArray(frontmatter.tags) ? frontmatter.tags : [];
-  const categoryName = frontmatter.category_zh || frontmatter.category || "未分類";
+  const categoryName = normalizeChineseCategoryName(frontmatter.category_zh || frontmatter.category || "未分類");
 
   const parent = useDataSource && notionDataSourceId
     ? { data_source_id: notionDataSourceId }
@@ -391,7 +424,7 @@ async function syncFile(filePath) {
 
   if (frontmatter.notion_synced === true) {
     if (existing) {
-      await appendFullContentIfMissing(existing.id, body);
+      await replaceFullContentSection(existing.id, body);
     }
     return { skipped: true, filePath };
   }
@@ -400,7 +433,7 @@ async function syncFile(filePath) {
 
   if (existing) {
     await notionRequest(`pages/${existing.id}`, "PATCH", { properties: payload.properties });
-    await appendFullContentIfMissing(existing.id, body);
+    await replaceFullContentSection(existing.id, body);
   } else {
     await notionRequest("pages", "POST", payload);
   }
