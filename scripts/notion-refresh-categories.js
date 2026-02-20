@@ -17,7 +17,7 @@ const MAPPING_PATH = path.join(ROOT, "config", "notion-mapping.json");
 const LEGACY_NOTION_VERSION = "2022-06-28";
 const MODERN_NOTION_VERSION = "2025-09-03";
 const MAX_PER_CATEGORY_ROWS = 120;
-const CATEGORY_LAYOUT = String(process.env.NOTION_CATEGORY_LAYOUT || "table").toLowerCase(); // table | visual
+const DEFAULT_CATEGORY_LAYOUT = "visual";
 
 let notionToken = process.env.NOTION_TOKEN || "";
 
@@ -331,6 +331,19 @@ function makeParagraph(text) {
   };
 }
 
+function makeLayoutSwitchBlock(layout, targetUrl) {
+  if (!targetUrl) return makeParagraph("切換連結暫時不可用");
+  const label = layout === "visual" ? "切換到表格式" : "切換到圖像式";
+  return {
+    object: "block",
+    type: "callout",
+    callout: {
+      rich_text: [textItem(label, targetUrl)],
+      icon: { type: "emoji", emoji: "🔁" },
+    },
+  };
+}
+
 function makeHeading(text) {
   return {
     object: "block",
@@ -443,7 +456,7 @@ async function appendTableBlocks(pageId, tableWidth, headerRow, dataRows) {
   }
 }
 
-async function updateCategoryPage(pageId, categoryName, rows) {
+async function updateCategoryPage(pageId, categoryName, rows, layout, switchTargetUrl) {
   await archiveAllChildren(pageId);
 
   const latest = rows[0] || null;
@@ -456,12 +469,13 @@ async function updateCategoryPage(pageId, categoryName, rows) {
     makeParagraph(`資料筆數：${rows.length}`),
     makeParagraph(`更新內容：${updateSummary}`),
     ...buildCategoryInsightBlocks(rows),
-    makeParagraph(`版型：${CATEGORY_LAYOUT === "visual" ? "圖像式" : "表格式"}`),
+    makeParagraph(`版型：${layout === "visual" ? "圖像式" : "表格式"}`),
+    makeLayoutSwitchBlock(layout, switchTargetUrl),
   ];
 
   await appendChildren(pageId, header);
 
-  if (CATEGORY_LAYOUT === "visual") {
+  if (layout === "visual") {
     await appendChildren(pageId, buildVisualLayoutBlocks(rows));
     return updateSummary;
   }
@@ -517,9 +531,26 @@ async function main() {
   const categoryNames = [...categoryMap.keys()].sort((a, b) => a.localeCompare(b, "zh-Hant"));
 
   for (const categoryName of categoryNames) {
-    const pageId = await findOrCreateChildPage(parentPageId, categoryName);
+    const visualPageId = await findOrCreateChildPage(parentPageId, categoryName);
+    const tablePageTitle = `${categoryName}（表格）`;
+    const tablePageId = await findOrCreateChildPage(parentPageId, tablePageTitle);
     const rows = categoryMap.get(categoryName) || [];
-    await updateCategoryPage(pageId, categoryName, rows);
+
+    await updateCategoryPage(
+      visualPageId,
+      categoryName,
+      rows,
+      DEFAULT_CATEGORY_LAYOUT,
+      notionPageUrlFromId(tablePageId)
+    );
+
+    await updateCategoryPage(
+      tablePageId,
+      categoryName,
+      rows,
+      "table",
+      notionPageUrlFromId(visualPageId)
+    );
   }
 
   console.log("✅ Notion 動態分類頁已更新");
