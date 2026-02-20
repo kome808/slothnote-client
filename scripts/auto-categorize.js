@@ -8,6 +8,8 @@ const path = require("path");
 
 const ROOT = path.join(__dirname, "..");
 const NOTES_DIR = path.join(ROOT, "notes");
+const TOP_LEVEL_MAX = 12;
+const TOP_LEVEL_RESERVED_OTHERS = "其他主題";
 
 function walkMarkdownFiles(dir) {
   const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -84,6 +86,8 @@ function buildMarkdown(frontmatter, body) {
     "date",
     "category",
     "category_zh",
+    "subcategory",
+    "subcategory_zh",
     "tags",
     "importance",
     "status",
@@ -220,41 +224,137 @@ function dedupePath(targetPath) {
   }
 }
 
+function tokenizeCategory(input) {
+  const text = String(input || "").toLowerCase();
+  const zhTokens = text.match(/[㐀-鿿]{1,2}/g) || [];
+  const enTokens = text
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((t) => t && t.length >= 2);
+  return new Set([...zhTokens, ...enTokens]);
+}
+
+function categorySimilarity(a, b) {
+  const ta = tokenizeCategory(a);
+  const tb = tokenizeCategory(b);
+  if (!ta.size || !tb.size) return 0;
+  let hit = 0;
+  for (const t of ta) if (tb.has(t)) hit += 1;
+  return hit;
+}
+
+function buildTaxonomy(records) {
+  const countMap = new Map();
+  for (const r of records) {
+    countMap.set(r.proposedZh, (countMap.get(r.proposedZh) || 0) + 1);
+  }
+
+  const sorted = [...countMap.entries()].sort((a, b) => b[1] - a[1]);
+  const uniqueCount = sorted.length;
+
+  if (uniqueCount <= TOP_LEVEL_MAX) {
+    return {
+      topBaseNames: sorted.map(([name]) => name),
+      hasOverflowBucket: false,
+    };
+  }
+
+  const topBaseNames = sorted.slice(0, TOP_LEVEL_MAX - 1).map(([name]) => name);
+  return {
+    topBaseNames,
+    hasOverflowBucket: true,
+  };
+}
+
+function resolveCategoryPlacement(proposedZh, taxonomy) {
+  if (taxonomy.topBaseNames.includes(proposedZh)) {
+    return { primaryZh: proposedZh, secondaryZh: "" };
+  }
+
+  let best = "";
+  let bestScore = 0;
+  for (const top of taxonomy.topBaseNames) {
+    const score = categorySimilarity(proposedZh, top);
+    if (score > bestScore) {
+      bestScore = score;
+      best = top;
+    }
+  }
+
+  if (best && bestScore >= 1) {
+    return { primaryZh: best, secondaryZh: proposedZh };
+  }
+
+  if (taxonomy.hasOverflowBucket) {
+    return { primaryZh: TOP_LEVEL_RESERVED_OTHERS, secondaryZh: proposedZh };
+  }
+
+  return { primaryZh: proposedZh, secondaryZh: "" };
+}
+
 function main() {
   const files = walkMarkdownFiles(NOTES_DIR);
+  const records = files.map((filePath) => {
+    const raw = fs.readFileSync(filePath, "utf8");
+    const { frontmatter, body } = parseFrontmatter(raw);
+    const proposedZh = detectCategoryName(frontmatter, body);
+    return { filePath, frontmatter, body, proposedZh };
+  });
+
+  const taxonomy = buildTaxonomy(records);
   let moved = 0;
   let updated = 0;
 
-  for (const filePath of files) {
-    const raw = fs.readFileSync(filePath, "utf8");
-    const { frontmatter, body } = parseFrontmatter(raw);
-    const nextZh = detectCategoryName(frontmatter, body);
-    const nextId = buildCategoryIdFromName(nextZh);
-    const currentId = slugifyId(frontmatter.category) || String(frontmatter.category || "");
+  for (const record of records) {
+    const { filePath, frontmatter, body, proposedZh } = record;
+    const placement = resolveCategoryPlacement(proposedZh, taxonomy);
 
-    frontmatter.category = nextId;
-    frontmatter.category_zh = nextZh;
+    const primaryZh = placement.primaryZh || "未分類";
+    const secondaryZh = placement.secondaryZh || "";
+    const primaryId = buildCategoryIdFromName(primaryZh);
+    const secondaryId = secondaryZh ? buildCategoryIdFromName(secondaryZh) : "";
 
-    if (currentId !== nextId) {
+    const prevPrimary = String(frontmatter.category || "");
+    const prevSecondary = String(frontmatter.subcategory || "");
+
+    frontmatter.category = primaryId;
+    frontmatter.category_zh = primaryZh;
+
+    if (secondaryZh) {
+      frontmatter.subcategory = secondaryId;
+      frontmatter.subcategory_zh = secondaryZh;
+    } else {
+      delete frontmatter.subcategory;
+      delete frontmatter.subcategory_zh;
+    }
+
+    if (prevPrimary !== primaryId || prevSecondary !== secondaryId) {
       frontmatter.notion_synced = false;
     }
 
-    const nextDir = path.join(NOTES_DIR, nextId);
+    const nextDir = secondaryId
+      ? path.join(NOTES_DIR, primaryId, secondaryId)
+      : path.join(NOTES_DIR, primaryId);
     if (!fs.existsSync(nextDir)) fs.mkdirSync(nextDir, { recursive: true });
+
     let nextPath = path.join(nextDir, path.basename(filePath));
+    const nextContent = buildMarkdown(frontmatter, body);
+
     if (path.resolve(nextPath) !== path.resolve(filePath)) {
       nextPath = dedupePath(nextPath);
-      fs.writeFileSync(filePath, buildMarkdown(frontmatter, body), "utf8");
+      fs.writeFileSync(filePath, nextContent, "utf8");
       fs.renameSync(filePath, nextPath);
       moved += 1;
       continue;
     }
 
-    fs.writeFileSync(filePath, buildMarkdown(frontmatter, body), "utf8");
+    fs.writeFileSync(filePath, nextContent, "utf8");
     updated += 1;
   }
 
+  const topLevelCount = taxonomy.topBaseNames.length + (taxonomy.hasOverflowBucket ? 1 : 0);
   console.log("✅ 動態重分類完成");
+  console.log(`- 第一層分類數：${topLevelCount}`);
   console.log(`- 檔案移動：${moved}`);
   console.log(`- 內容更新：${updated}`);
 }
