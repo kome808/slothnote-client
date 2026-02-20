@@ -2,14 +2,14 @@
  * pull-pending.js
  * 從 Cloudflare Worker 拉取待處理連結，寫入本地 _pending.json
  *
- * 用法：WORKER_BASE_URL=... WORKER_INTERNAL_API_KEY=... node scripts/pull-pending.js
+ * 用法：WORKER_BASE_URL=... WORKER_CLIENT_API_KEY=... node scripts/pull-pending.js
  */
 
 const fs = require("fs");
 const path = require("path");
 
 const workerBaseUrl = process.env.WORKER_BASE_URL;
-const workerApiKey = process.env.WORKER_INTERNAL_API_KEY;
+const workerApiKey = process.env.WORKER_CLIENT_API_KEY;
 let lineUserId = process.env.LINE_USER_ID;
 
 if (!workerBaseUrl) {
@@ -18,7 +18,7 @@ if (!workerBaseUrl) {
 }
 
 if (!workerApiKey) {
-    console.error("❌ 缺少 WORKER_INTERNAL_API_KEY");
+    console.error("❌ 缺少 WORKER_CLIENT_API_KEY");
     process.exit(1);
 }
 function upsertEnvLocalLineUserId(value) {
@@ -35,10 +35,10 @@ function upsertEnvLocalLineUserId(value) {
 }
 
 async function inferLineUserId() {
-    const response = await fetch(`${workerBaseUrl.replace(/\/$/, "")}/internal/bootstrap-line-user`, {
+    const response = await fetch(`${workerBaseUrl.replace(/\/$/, "")}/client/bootstrap-line-user`, {
         method: "GET",
         headers: {
-            "x-api-key": workerApiKey,
+            "x-client-key": workerApiKey,
         },
     });
     if (!response.ok) {
@@ -62,13 +62,13 @@ async function pullPending() {
 
     console.log("🔄 從 Cloudflare Worker 拉取待處理連結...\n");
 
-    const url = new URL(`${workerBaseUrl.replace(/\/$/, "")}/internal/pending`);
+    const url = new URL(`${workerBaseUrl.replace(/\/$/, "")}/client/pending`);
     url.searchParams.set("line_user_id", lineUserId);
 
     const response = await fetch(url.toString(), {
         method: "GET",
         headers: {
-            "x-api-key": workerApiKey,
+            "x-client-key": workerApiKey,
         },
     });
     if (!response.ok) {

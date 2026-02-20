@@ -59,16 +59,17 @@ function shouldDisableDataSource(error) {
 
 async function loadRuntimeNotionConfigFromWorker() {
   const workerBaseUrl = process.env.WORKER_BASE_URL || "";
-  const workerApiKey = process.env.WORKER_INTERNAL_API_KEY || "";
+  const workerApiKey = process.env.WORKER_CLIENT_API_KEY || process.env.WORKER_INTERNAL_API_KEY || "";
+  const workerHeaderName = process.env.WORKER_CLIENT_API_KEY ? "x-client-key" : "x-api-key";
   const lineUserId = process.env.LINE_USER_ID || "";
-  if (!workerBaseUrl || !workerApiKey || !lineUserId) return false;
+  if (!workerBaseUrl || !workerApiKey) return false;
 
-  const url = new URL(`${workerBaseUrl.replace(/\/$/, "")}/internal/notion-runtime`);
-  url.searchParams.set("line_user_id", lineUserId);
+  const url = new URL(`${workerBaseUrl.replace(/\/$/, "")}/client/notion-runtime`);
+  if (lineUserId) url.searchParams.set("line_user_id", lineUserId);
 
   const response = await fetch(url.toString(), {
     method: "GET",
-    headers: { "x-api-key": workerApiKey },
+    headers: { [workerHeaderName]: workerApiKey },
   });
   if (!response.ok) {
     const text = await response.text();

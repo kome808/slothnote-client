@@ -10,7 +10,7 @@ const fs = require("fs");
 const path = require("path");
 
 const workerBaseUrl = process.env.WORKER_BASE_URL;
-const workerApiKey = process.env.WORKER_INTERNAL_API_KEY;
+const workerApiKey = process.env.WORKER_CLIENT_API_KEY;
 let lineUserId = process.env.LINE_USER_ID;
 
 if (!workerBaseUrl) {
@@ -19,7 +19,7 @@ if (!workerBaseUrl) {
 }
 
 if (!workerApiKey) {
-    console.error("❌ 缺少 WORKER_INTERNAL_API_KEY");
+    console.error("❌ 缺少 WORKER_CLIENT_API_KEY");
     process.exit(1);
 }
 function upsertEnvLocalLineUserId(value) {
@@ -36,10 +36,10 @@ function upsertEnvLocalLineUserId(value) {
 }
 
 async function inferLineUserId() {
-    const response = await fetch(`${workerBaseUrl.replace(/\/$/, "")}/internal/bootstrap-line-user`, {
+    const response = await fetch(`${workerBaseUrl.replace(/\/$/, "")}/client/bootstrap-line-user`, {
         method: "GET",
         headers: {
-            "x-api-key": workerApiKey,
+            "x-client-key": workerApiKey,
         },
     });
     if (!response.ok) {
@@ -77,16 +77,15 @@ async function markDone() {
 
     console.log(`🔄 標記 ${links.length} 個連結為已完成...\n`);
 
-    const response = await fetch(`${workerBaseUrl.replace(/\/$/, "")}/internal/mark-done`, {
+    const response = await fetch(`${workerBaseUrl.replace(/\/$/, "")}/client/mark-done`, {
         method: "POST",
         headers: {
             "content-type": "application/json",
-            "x-api-key": workerApiKey,
+            "x-client-key": workerApiKey,
         },
         body: JSON.stringify({
             ids: links.map((link) => link.id),
-            line_user_id: lineUserId,
-        }),
+                    }),
     });
     if (!response.ok) {
         const text = await response.text();

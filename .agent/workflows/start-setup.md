@@ -60,7 +60,7 @@ node scripts/start-setup.js
 
 腳本只會要求你貼上配對碼，會自動寫入：
 - WORKER_BASE_URL
-- WORKER_INTERNAL_API_KEY
+- WORKER_CLIENT_API_KEY
 - LINE_USER_ID
 
 ### C-2. LINE 綁定流程

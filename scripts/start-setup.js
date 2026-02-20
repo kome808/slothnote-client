@@ -110,7 +110,8 @@ async function main() {
   }
 
   envMap.set("WORKER_BASE_URL", claimed.workerBaseUrl || workerBaseUrl);
-  envMap.set("WORKER_INTERNAL_API_KEY", claimed.workerInternalApiKey || "");
+  envMap.set("WORKER_CLIENT_API_KEY", claimed.workerClientApiKey || "");
+  if (envMap.has("WORKER_INTERNAL_API_KEY")) envMap.delete("WORKER_INTERNAL_API_KEY");
   envMap.set("LINE_USER_ID", claimed.lineUserId || "");
   cleanupOptionalNotionPlaceholders(envMap);
 
@@ -118,7 +119,7 @@ async function main() {
   rl.close();
 
   console.log("\n✅ 已完成本機設定（配對成功）");
-  console.log("已自動寫入：WORKER_BASE_URL、WORKER_INTERNAL_API_KEY、LINE_USER_ID");
+  console.log("已自動寫入：WORKER_BASE_URL、WORKER_CLIENT_API_KEY、LINE_USER_ID");
   console.log(`設定檔：${ENV_LOCAL}`);
 
   if (!claimed.notionBound) {
