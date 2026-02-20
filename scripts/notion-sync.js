@@ -169,21 +169,48 @@ function stringifyValue(value) {
 }
 
 function buildMarkdown(frontmatter, body) {
-  const lines = [
-    "---",
-    `title: ${stringifyValue(frontmatter.title || "")}`,
-    `url: ${stringifyValue(frontmatter.url || "")}`,
-    `source: ${stringifyValue(frontmatter.source || "web")}`,
-    `date: ${frontmatter.date || new Date().toISOString().slice(0, 10)}`,
-    `category: ${stringifyValue(frontmatter.category || "uncategorized")}`,
-    `tags: ${JSON.stringify(frontmatter.tags || [])}`,
-    `importance: ${Number(frontmatter.importance || 1)}`,
-    `status: ${stringifyValue(frontmatter.status || "unread")}`,
-    `notion_synced: ${frontmatter.notion_synced ? "true" : "false"}`,
-    "---",
+  const orderedKeys = [
+    "title",
+    "url",
+    "source",
+    "date",
+    "category",
+    "category_zh",
+    "tags",
+    "importance",
+    "status",
+    "cover_image",
+    "notion_synced",
   ];
+  const normalized = {
+    ...frontmatter,
+    title: frontmatter.title || "",
+    url: frontmatter.url || "",
+    source: frontmatter.source || "web",
+    date: frontmatter.date || new Date().toISOString().slice(0, 10),
+    category: frontmatter.category || "uncategorized",
+    category_zh: frontmatter.category_zh || "未分類",
+    tags: frontmatter.tags || [],
+    importance: Number(frontmatter.importance || 1),
+    status: frontmatter.status || "unread",
+    notion_synced: Boolean(frontmatter.notion_synced),
+  };
+
+  const lines = ["---"];
+  const included = new Set();
+  for (const key of orderedKeys) {
+    if (!(key in normalized)) continue;
+    lines.push(`${key}: ${stringifyValue(normalized[key])}`);
+    included.add(key);
+  }
+  for (const key of Object.keys(normalized)) {
+    if (included.has(key)) continue;
+    lines.push(`${key}: ${stringifyValue(normalized[key])}`);
+  }
+  lines.push("---");
   return `${lines.join("\n")}\n${body.startsWith("\n") ? body : `\n${body}`}`;
 }
+
 
 function normalizeStatus(status) {
   const map = {
@@ -216,7 +243,7 @@ function normalizeChineseCategoryName(input) {
   const raw = String(input || "").trim();
   if (!raw) return "未分類";
   if (/[㐀-鿿]/.test(raw)) return raw;
-  const key = raw.toLowerCase().replace(/s+/g, "-");
+  const key = raw.toLowerCase().replace(/\s+/g, "-");
   return CATEGORY_ZH_MAP[key] || "未分類";
 }
 
@@ -445,8 +472,12 @@ async function syncFile(filePath) {
   if (frontmatter.notion_synced === true) {
     if (existing) {
       await replaceFullContentSection(existing.id, body);
+      return { skipped: true, filePath };
     }
-    return { skipped: true, filePath };
+    // 本地已標記同步但遠端不存在時，自動補建以修復數量不一致。
+    const payload = buildPagePayload(frontmatter, body);
+    await notionRequest("pages", "POST", payload);
+    return { skipped: false, filePath, updated: false, repaired: true };
   }
 
   const payload = buildPagePayload(frontmatter, body);
@@ -509,7 +540,7 @@ async function main() {
       continue;
     }
     synced += 1;
-    const action = result.updated ? "更新" : "建立";
+    const action = result.repaired ? "補建" : (result.updated ? "更新" : "建立");
     console.log(`✅ ${action} Notion 頁面：${path.relative(ROOT, result.filePath)}`);
   }
 

@@ -17,7 +17,7 @@ const MAPPING_PATH = path.join(ROOT, "config", "notion-mapping.json");
 const LEGACY_NOTION_VERSION = "2022-06-28";
 const MODERN_NOTION_VERSION = "2025-09-03";
 const MAX_PER_CATEGORY_ROWS = 120;
-const CATEGORY_LAYOUT = String(process.env.NOTION_CATEGORY_LAYOUT || "list").toLowerCase();
+const CATEGORY_LAYOUT = String(process.env.NOTION_CATEGORY_LAYOUT || "table").toLowerCase();
 
 let notionToken = process.env.NOTION_TOKEN || "";
 
@@ -456,7 +456,7 @@ async function updateCategoryPage(pageId, categoryName, rows) {
     makeParagraph(`資料筆數：${rows.length}`),
     makeParagraph(`更新內容：${updateSummary}`),
     ...buildCategoryInsightBlocks(rows),
-    makeParagraph(`版型：${CATEGORY_LAYOUT === "visual" ? "圖像式" : "條列式"}`),
+    makeParagraph(`版型：${CATEGORY_LAYOUT === "visual" ? "圖像式" : (CATEGORY_LAYOUT === "list" ? "條列式" : "表格式")}`),
   ];
 
   await appendChildren(pageId, header);
@@ -513,6 +513,7 @@ async function main() {
     process.exit(0);
   }
 
+  console.log(`INFO category refresh database_id: ${databaseId}`);
   const notes = await queryAllNotes();
   const categoryMap = buildCategoryMap(notes);
   const legacyRoot = await findChildPageByTitle(parentPageId, "文章分類");
@@ -535,6 +536,13 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error("❌ 更新 Notion 分類頁失敗:", error.message);
+  const msg = String(error?.message || "");
+  const isDb404 = msg.includes("Notion API 404") && msg.includes("Could not find database with ID");
+  if (isDb404) {
+    console.warn("⚠️ 分類頁更新略過：目前綁定的 database_id 無法存取。");
+    console.warn("請在 LINE 重新執行：設定 Notion 頁面 你的 Notion 頁面網址，之後再同步一次。");
+    process.exit(0);
+  }
+  console.error("❌ 更新 Notion 分類頁失敗:", msg);
   process.exit(1);
 });
