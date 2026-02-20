@@ -6,6 +6,7 @@
  * 1) 分類不預建，完全依目前筆記內容產生
  * 2) 分類頁顯示：名稱、資料筆數、更新內容
  * 3) 點進分類後，使用表格方式顯示該分類文章列表
+ * 4) 分類頁直接建立在指定 parent page 下（不再多一層「文章分類」）
  */
 
 const fs = require("fs");
@@ -160,10 +161,6 @@ function getSummary(page) {
   return text;
 }
 
-function notionPageUrlFromId(id) {
-  return `https://www.notion.so/${String(id || "").replace(/-/g, "")}`;
-}
-
 function normalizeCategoryName(name) {
   const out = String(name || "").replace(/\s+/g, " ").trim();
   return out || "未分類";
@@ -274,7 +271,7 @@ function makeHeading(text) {
   };
 }
 
-function makeTableBlock(tableWidth) {
+function makeTableBlock(tableWidth, rows = []) {
   return {
     object: "block",
     type: "table",
@@ -282,6 +279,7 @@ function makeTableBlock(tableWidth) {
       table_width: tableWidth,
       has_column_header: true,
       has_row_header: false,
+      children: rows,
     },
   };
 }
@@ -317,40 +315,19 @@ function truncateText(text, max = 44) {
   return input.length > max ? `${input.slice(0, max)}…` : input;
 }
 
-async function updateRootSummaryPage(rootId, categoryRows) {
-  await archiveAllChildren(rootId);
-
-  const intro = [
-    makeParagraph("文章分類（動態）｜依目前筆記內容自動調整"),
-    makeParagraph(`分類數：${categoryRows.length}`),
-  ];
-
-  await appendChildren(rootId, intro);
-
-  const tableRows = [
-    makeTableRow(["分類名稱", "資料筆數", "更新內容"]),
-    ...categoryRows.map((row) => makeLinkedTableRow([
-      { text: row.name, link: row.pageUrl },
-      String(row.count),
-      row.updateSummary,
-    ])),
-  ];
-
-  try {
-    const created = await notionRequest(`blocks/${rootId}/children`, "PATCH", {
-      children: [makeTableBlock(3)],
-    });
-    const tableId = created?.results?.[0]?.id;
-    if (!tableId) throw new Error("table block id not found");
-    await appendChildren(tableId, tableRows);
-  } catch (error) {
-    await appendChildren(
-      rootId,
-      [
-        makeParagraph("（表格建立失敗，已改用清單顯示）"),
-        ...categoryRows.map((row) => makeParagraph(`${row.name}｜${row.count} 篇｜${row.updateSummary}`)),
-      ]
-    );
+async function appendTableBlocks(pageId, tableWidth, headerRow, dataRows) {
+  const chunkSize = 80;
+  const chunks = [];
+  if (!dataRows.length) {
+    chunks.push([]);
+  } else {
+    for (let i = 0; i < dataRows.length; i += chunkSize) {
+      chunks.push(dataRows.slice(i, i + chunkSize));
+    }
+  }
+  for (const rows of chunks) {
+    const tableBlock = makeTableBlock(tableWidth, [headerRow, ...rows]);
+    await appendChildren(pageId, [tableBlock]);
   }
 }
 
@@ -369,7 +346,8 @@ async function updateCategoryPage(pageId, categoryName, rows) {
     makeParagraph("以下用表格列出本分類文章（自動更新）"),
   ];
 
-  const tableRows = [makeTableRow(["標題", "收集日期", "來源", "摘要", "原文"])];
+  const tableHeader = makeTableRow(["標題", "收集日期", "來源", "摘要", "原文"]);
+  const tableRows = [];
   for (const row of rows.slice(0, MAX_PER_CATEGORY_ROWS)) {
     tableRows.push(makeLinkedTableRow([
       { text: truncateText(row.title, 42), link: row.url },
@@ -386,12 +364,7 @@ async function updateCategoryPage(pageId, categoryName, rows) {
 
   await appendChildren(pageId, header);
   try {
-    const created = await notionRequest(`blocks/${pageId}/children`, "PATCH", {
-      children: [makeTableBlock(5)],
-    });
-    const tableId = created?.results?.[0]?.id;
-    if (!tableId) throw new Error("table block id not found");
-    await appendChildren(tableId, tableRows);
+    await appendTableBlocks(pageId, 5, tableHeader, tableRows);
   } catch (error) {
     await appendChildren(
       pageId,
@@ -406,14 +379,9 @@ async function updateCategoryPage(pageId, categoryName, rows) {
   return updateSummary;
 }
 
-async function archiveRemovedCategoryPages(rootId, activeCategoryNames) {
-  const children = await listChildPageBlocks(rootId);
-  for (const block of children) {
-    const title = normalizeCategoryName(block.child_page?.title || "");
-    if (!activeCategoryNames.has(title)) {
-      await archiveBlock(block.id);
-    }
-  }
+async function findChildPageByTitle(parentId, title) {
+  const children = await listChildPageBlocks(parentId);
+  return children.find((b) => (b.child_page?.title || "").trim() === title) || null;
 }
 
 async function main() {
@@ -435,33 +403,23 @@ async function main() {
 
   const notes = await queryAllNotes();
   const categoryMap = buildCategoryMap(notes);
-
-  const rootId = await findOrCreateChildPage(parentPageId, "文章分類");
-  const categoryNames = [...categoryMap.keys()].sort((a, b) => a.localeCompare(b, "zh-Hant"));
-  const activeCategoryNames = new Set(categoryNames);
-
-  await archiveRemovedCategoryPages(rootId, activeCategoryNames);
-
-  const summaryRows = [];
-  for (const categoryName of categoryNames) {
-    const pageId = await findOrCreateChildPage(rootId, categoryName);
-    const rows = categoryMap.get(categoryName) || [];
-    const updateSummary = await updateCategoryPage(pageId, categoryName, rows);
-
-    summaryRows.push({
-      name: categoryName,
-      count: rows.length,
-      updateSummary,
-      pageUrl: notionPageUrlFromId(pageId),
-    });
+  const legacyRoot = await findChildPageByTitle(parentPageId, "文章分類");
+  if (legacyRoot) {
+    await archiveBlock(legacyRoot.id);
+    console.log("ℹ️ 已移除舊版中介頁「文章分類」。");
   }
 
-  summaryRows.sort((a, b) => b.count - a.count);
-  await updateRootSummaryPage(rootId, summaryRows);
+  const categoryNames = [...categoryMap.keys()].sort((a, b) => a.localeCompare(b, "zh-Hant"));
+
+  for (const categoryName of categoryNames) {
+    const pageId = await findOrCreateChildPage(parentPageId, categoryName);
+    const rows = categoryMap.get(categoryName) || [];
+    await updateCategoryPage(pageId, categoryName, rows);
+  }
 
   console.log("✅ Notion 動態分類頁已更新");
-  console.log(`- 根頁：文章分類`);
-  console.log(`- 分類數：${summaryRows.length}`);
+  console.log(`- 分類頁父層：${parentPageId}`);
+  console.log(`- 分類數：${categoryNames.length}`);
 }
 
 main().catch((error) => {

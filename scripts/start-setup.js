@@ -108,11 +108,11 @@ async function main() {
   if (!claimed.notionBound) {
     console.log("\n下一步（LINE 內）：");
     console.log("1) 輸入：綁定 Notion");
-    console.log("2) 完成授權後輸入：設定 Notion 頁面 <你的 Notion 頁面網址>");
+    console.log("2) 完成授權後輸入：設定 Notion 頁面 你的 Notion 頁面網址");
     console.log("3) 輸入：綁定狀態");
   } else if (!claimed.notionPageConfigured || !claimed.notionDatabaseConfigured) {
     console.log("\n你已綁定 Notion，但尚未完成頁面/資料庫設定。");
-    console.log("請在 LINE 輸入：設定 Notion 頁面 <你的 Notion 頁面網址>");
+    console.log("請在 LINE 輸入：設定 Notion 頁面 你的 Notion 頁面網址");
   } else {
     console.log("\nNotion 綁定與資料庫設定已完成，可直接開始整理。");
   }

@@ -52,6 +52,7 @@ npx wrangler deploy
 ### C-1. 本機初始化
 
 先在 LINE 官方帳號輸入：`開始設定`，取得 8 碼配對碼（10 分鐘有效）。
+一般使用者不需要安裝任何 auto-skill 或額外插件。
 
 ```bash
 node scripts/start-setup.js
@@ -68,7 +69,7 @@ node scripts/start-setup.js
 
 1. `綁定 Notion`
 2. 完成授權
-3. `設定 Notion 頁面 <你的 Notion 頁面網址>`
+3. `設定 Notion 頁面 你的 Notion 頁面網址`
 4. `綁定狀態`
 
 ### C-3. 開始使用
@@ -86,7 +87,7 @@ node scripts/start-setup.js
 - 檢查 Redirect URI 是否完全一致（含 https、路徑、大小寫）。
 
 3. 綁定成功但無法同步
-- 重新輸入：`設定 Notion 頁面 <頁面網址>`
+- 重新輸入：`設定 Notion 頁面 頁面網址`
 - 再輸入：`綁定狀態` 確認。
 
 4. 使用者擔心資料外流
