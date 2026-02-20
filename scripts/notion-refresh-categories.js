@@ -17,6 +17,7 @@ const MAPPING_PATH = path.join(ROOT, "config", "notion-mapping.json");
 const LEGACY_NOTION_VERSION = "2022-06-28";
 const MODERN_NOTION_VERSION = "2025-09-03";
 const MAX_PER_CATEGORY_ROWS = 120;
+const CATEGORY_PAGE_SIZE = 20;
 const DEFAULT_CATEGORY_LAYOUT = "visual";
 
 let notionToken = process.env.NOTION_TOKEN || "";
@@ -200,40 +201,93 @@ function buildCategoryInsightBlocks(rows) {
 
   const sourceCount = new Map();
   const titleTokens = new Map();
+  const summaryTokens = new Map();
   const stopwords = new Set(["的", "與", "和", "在", "是", "了", "及", "並", "to", "for", "and", "the", "a", "an"]);
+
+  const collectTokens = (input, targetMap) => {
+    const tokens = String(input || "")
+      .toLowerCase()
+      .replace(/[^㐀-鿿a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter((t) => t && t.length >= 2 && !stopwords.has(t));
+    for (const token of tokens) {
+      targetMap.set(token, (targetMap.get(token) || 0) + 1);
+    }
+  };
 
   for (const row of rows) {
     const source = String(row.source || "web");
     sourceCount.set(source, (sourceCount.get(source) || 0) + 1);
-
-    const tokens = String(row.title || "")
-      .toLowerCase()
-      .replace(/[^\u3400-\u9fffa-z0-9\s]/g, " ")
-      .split(/\s+/)
-      .filter((t) => t && t.length >= 2 && !stopwords.has(t));
-    for (const token of tokens) {
-      titleTokens.set(token, (titleTokens.get(token) || 0) + 1);
-    }
+    collectTokens(row.title, titleTokens);
+    collectTokens(row.summary, summaryTokens);
   }
 
   const topSource = [...sourceCount.entries()].sort((a, b) => b[1] - a[1])[0];
-  const hotTopics = [...titleTokens.entries()]
+  const hotTitleTopics = [...titleTokens.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([name]) => name);
+  const hotSummaryTopics = [...summaryTokens.entries()]
     .sort((a, b) => b[1] - a[1])
     .slice(0, 5)
     .map(([name]) => name);
 
-  const newest = rows.slice(0, 3).map((r) => `- ${r.collectionDate}：${truncateText(r.title, 32)}`);
+  const newest = rows.slice(0, 3).map((r) => `${r.collectionDate}：${truncateText(r.title, 34)}`);
+  const oldest = rows.slice(-3).map((r) => `${r.collectionDate}：${truncateText(r.title, 34)}`);
 
-  const blocks = [
-    makeHeading("分類整合洞察"),
-    makeParagraph(`近期待關注：本分類共 ${rows.length} 篇，最近更新為 ${rows[0].collectionDate || "未知日期"}。`),
-    makeParagraph(topSource ? `來源分佈：${topSource[0]} 佔比最高（${topSource[1]} 篇）。` : "來源分佈：目前資料不足。"),
-    makeParagraph(hotTopics.length ? `高頻主題詞：${hotTopics.join("、")}` : "高頻主題詞：目前資料不足。"),
-    makeParagraph(`近期文章：\n${newest.join("\n")}`),
+  const compareCommon = hotSummaryTopics.length ? hotSummaryTopics.join("、") : (hotTitleTopics.length ? hotTitleTopics.join("、") : "目前資料不足");
+  const compareDifferent = rows.length >= 4
+    ? `近期文章較聚焦「${hotTitleTopics[0] || "主題A"}」，早期文章較偏向「${hotTitleTopics[1] || "主題B"}」。`
+    : "目前篇數較少，先持續收集可提升比較精度。";
+
+  const trendSummary = [
+    `最近更新：${rows[0].collectionDate || "未知日期"}`,
+    topSource ? `主要來源：${topSource[0]}（${topSource[1]} 篇）` : "主要來源：資料不足",
+    `近期高頻：${hotTitleTopics.slice(0, 3).join("、") || "資料不足"}`,
   ];
 
-  return blocks;
+  const extensionIdeas = [
+    hotSummaryTopics[0]
+      ? `追蹤「${hotSummaryTopics[0]}」在不同來源的實作案例，整理共通做法與失敗模式。`
+      : "補充不同來源的實作案例，建立可比較的觀察維度。",
+    hotSummaryTopics[1]
+      ? `針對「${hotSummaryTopics[1]}」建立評估指標，將主觀判斷轉成可追蹤數據。`
+      : "建立評估指標（成本/效益/風險）來比較不同做法。",
+    `從近期文章延伸一個可驗證實驗：定義假設、執行步驟、觀察期限與成功條件。`,
+  ];
+
+  return [
+    makeHeading("分類整合洞察"),
+    makeParagraph(`近期待關注：本分類共 ${rows.length} 篇。`),
+    makeParagraph(`近期文章：${newest.join("｜")}`),
+
+    {
+      object: "block",
+      type: "heading_3",
+      heading_3: { rich_text: [textItem("觀點比較")] },
+    },
+    makeParagraph(`共同觀點：${compareCommon}`),
+    makeParagraph(`差異觀點：${compareDifferent}`),
+
+    {
+      object: "block",
+      type: "heading_3",
+      heading_3: { rich_text: [textItem("趨勢追蹤")] },
+    },
+    makeParagraph(trendSummary.join("；")),
+    makeParagraph(`較早期文章：${oldest.join("｜") || "資料不足"}`),
+
+    {
+      object: "block",
+      type: "heading_3",
+      heading_3: { rich_text: [textItem("延伸知識")] },
+    },
+    makeBulletedItem(extensionIdeas[0]),
+    makeBulletedItem(extensionIdeas[1]),
+    makeBulletedItem(extensionIdeas[2]),
+  ];
 }
+
 
 function sortByDateDesc(a, b) {
   const da = Date.parse(a.collectionDate || "") || 0;
@@ -414,6 +468,18 @@ function makeLinkedTableRow(cells) {
   };
 }
 
+function chunkRows(rows, size = CATEGORY_PAGE_SIZE) {
+  const out = [];
+  for (let i = 0; i < rows.length; i += size) {
+    out.push(rows.slice(i, i + size));
+  }
+  return out.length ? out : [[]];
+}
+
+function buildPaginationLabel(pageNo, totalPages) {
+  return `第 ${pageNo} / ${totalPages} 頁`;
+}
+
 function truncateText(text, max = 44) {
   const input = String(text || "").trim();
   if (!input) return "";
@@ -430,7 +496,7 @@ function buildListLayoutBlocks(rows) {
 function buildVisualLayoutBlocks(rows) {
   if (!rows.length) return [makeParagraph("目前沒有文章。")];
   const blocks = [];
-  for (const row of rows.slice(0, Math.min(MAX_PER_CATEGORY_ROWS, 30))) {
+  for (const row of rows) {
     blocks.push(makeHeading(truncateText(row.title, 60)));
     if (row.coverImage) blocks.push(makeImageBlock(row.coverImage, "文章封面"));
     blocks.push(makeParagraph(`日期：${row.collectionDate || ""}｜來源：${row.source || "web"}`));
@@ -440,20 +506,17 @@ function buildVisualLayoutBlocks(rows) {
   return blocks;
 }
 
-async function appendTableBlocks(pageId, tableWidth, headerRow, dataRows) {
-  const chunkSize = 80;
-  const chunks = [];
-  if (!dataRows.length) {
-    chunks.push([]);
-  } else {
-    for (let i = 0; i < dataRows.length; i += chunkSize) {
-      chunks.push(dataRows.slice(i, i + chunkSize));
-    }
-  }
-  for (const rows of chunks) {
-    const tableBlock = makeTableBlock(tableWidth, [headerRow, ...rows]);
-    await appendChildren(pageId, [tableBlock]);
-  }
+async function appendTablePage(pageId, tableWidth, headerRow, dataRows, pageNo, totalPages) {
+  const blocks = [
+    {
+      object: "block",
+      type: "heading_3",
+      heading_3: { rich_text: [textItem(buildPaginationLabel(pageNo, totalPages))] },
+    },
+  ];
+  const tableBlock = makeTableBlock(tableWidth, [headerRow, ...dataRows]);
+  blocks.push(tableBlock);
+  await appendChildren(pageId, blocks);
 }
 
 async function updateCategoryPage(pageId, categoryName, rows, layout, switchTargetUrl) {
@@ -475,25 +538,42 @@ async function updateCategoryPage(pageId, categoryName, rows, layout, switchTarg
 
   await appendChildren(pageId, header);
 
+  const limitedRows = rows.slice(0, MAX_PER_CATEGORY_ROWS);
+  const pages = chunkRows(limitedRows, CATEGORY_PAGE_SIZE);
+
   if (layout === "visual") {
-    await appendChildren(pageId, buildVisualLayoutBlocks(rows));
+    await appendChildren(pageId, [makeParagraph("以下用圖像卡片分頁列出本分類文章（每頁 20 筆）")]);
+    for (let i = 0; i < pages.length; i += 1) {
+      const pageRows = pages[i];
+      const pageNo = i + 1;
+      await appendChildren(pageId, [
+        {
+          object: "block",
+          type: "heading_3",
+          heading_3: { rich_text: [textItem(buildPaginationLabel(pageNo, pages.length))] },
+        },
+      ]);
+      await appendChildren(pageId, buildVisualLayoutBlocks(pageRows));
+    }
     return updateSummary;
   }
 
   const tableHeader = makeTableRow(["標題", "收集日期", "來源", "摘要", "原文"]);
-  const tableRows = [];
-  for (const row of rows.slice(0, MAX_PER_CATEGORY_ROWS)) {
-    tableRows.push(makeLinkedTableRow([
-      { text: truncateText(row.title, 42), link: row.url },
-      row.collectionDate || "",
-      row.source || "web",
-      truncateText(row.summary, 48),
-      { text: row.originalUrl ? "開啟" : "", link: row.originalUrl || null },
-    ]));
+  await appendChildren(pageId, [makeParagraph("以下用表格分頁列出本分類文章（每頁 20 筆）")]);
+  for (let i = 0; i < pages.length; i += 1) {
+    const pageRows = pages[i];
+    const tableRows = [];
+    for (const row of pageRows) {
+      tableRows.push(makeLinkedTableRow([
+        { text: truncateText(row.title, 42), link: row.url },
+        row.collectionDate || "",
+        row.source || "web",
+        truncateText(row.summary, 48),
+        { text: row.originalUrl ? "開啟" : "", link: row.originalUrl || null },
+      ]));
+    }
+    await appendTablePage(pageId, 5, tableHeader, tableRows, i + 1, pages.length);
   }
-
-  await appendChildren(pageId, [makeParagraph("以下用表格列出本分類文章（自動更新）")]);
-  await appendTableBlocks(pageId, 5, tableHeader, tableRows);
   return updateSummary;
 }
 
