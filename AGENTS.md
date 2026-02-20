@@ -24,16 +24,17 @@
 
 1. 執行 `node scripts/pull-pending.js` 拉取待處理連結。
 2. 讀取 `notes/_pending.json`。
-3. 若清單為空，回覆「目前沒有待整理連結」並結束。
-4. 逐篇整理：擷取內容、摘要、分類、關聯洞察。
-5. 寫入 `notes/{category}/YYYY-MM-DD-{slug}.md`。
-6. 更新 `notes/_index.md`。
-7. 執行 `node scripts/mark-done.js`。
-8. 執行 `npm run notion:sync`。
-9. `notion:sync` 內會自動：
-   - 依內容動態重分類並移動舊筆記（`auto-categorize.js`）
-   - 更新 Notion「文章分類」頁面（顯示分類名稱、資料筆數、更新內容，且可點入查看表格列表）
-10. 回覆本次整理結果（篇數、分類、失敗項目）。
+3. 若清單有連結：逐篇整理（擷取內容、摘要、分類、關聯洞察）並寫入 `notes/{category}/YYYY-MM-DD-{slug}.md`。
+4. 若清單為空：不要結束，仍要繼續做本機與 Notion 一致性補齊。
+5. 更新 `notes/_index.md`。
+6. 執行 `node scripts/auto-categorize.js`。
+7. 若第 3 步有新連結被處理，再執行 `node scripts/mark-done.js`；沒有新連結則略過。
+8. 一律執行 `npm run notion:sync`，用途：
+   - 比對本機 `notes/` 與 Notion
+   - 補上 Notion 缺漏筆記頁
+   - 回填既有頁面的欄位（摘要/標籤/狀態/AI 洞察/原始連結）
+   - 更新分類頁（預設表格）
+9. 回覆本次整理結果（篇數、分類、失敗項目）。
 
 ## Token 節省規則（摘要優先）
 
@@ -46,7 +47,7 @@
 執行流程前需確保已載入：
 
 - `WORKER_BASE_URL`
-- `WORKER_INTERNAL_API_KEY`
+- `WORKER_CLIENT_API_KEY`
 - `LINE_USER_ID`
 
 > 若已完成 LINE 的 Notion 綁定，`notion:sync` 可自動取得 Notion 同步設定，不一定要本機 `NOTION_TOKEN`。
