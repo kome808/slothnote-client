@@ -7,8 +7,9 @@
 1. `node scripts/pull-pending.js`
 2. 讀取 `notes/_pending.json`
 3. 若有新連結：先 `npm run fetch:fulltext -- <url>` 抓整頁內容，再逐篇整理並寫入 `notes/`
-4. 不論是否有新連結，皆必須執行：`npm run reconcile:notion`
-5. 若有處理新連結，且確認檔案已寫入 `notes/`，再執行：`node scripts/mark-done.js`
+4. 若有處理新連結且已寫入 `notes/*.md`，執行：`node scripts/clear-raw.js`（清除 `_raw` 暫存）
+5. 不論是否有新連結，皆必須執行：`npm run reconcile:notion`
+6. 若有處理新連結，且確認檔案已寫入 `notes/`，再執行：`node scripts/mark-done.js`
 
 當使用者輸入「同步筆記」或「再次同步」時，請執行同步補齊模式：
 

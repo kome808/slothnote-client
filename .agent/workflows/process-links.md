@@ -123,6 +123,14 @@ notion_synced: false
 - 知識缺口
 - 下一步建議
 
+### 3f. 清理暫存全文素材（成功寫入 md 後）
+
+每篇筆記完成並寫入 `*.md` 後，刪除 `_raw` 暫存：
+
+```bash
+node scripts/clear-raw.js
+```
+
 ### 4. 更新分類索引
 
 更新 `notes/_index.md`。

@@ -32,8 +32,9 @@
 3. 若清單有連結：每篇先執行 `npm run fetch:fulltext -- <url>` 抓整頁素材，再整理（摘要、分類、關聯洞察）並寫入 `notes/{category}/YYYY-MM-DD-{slug}.md`。
 4. 若清單為空：不要結束，必須繼續執行補齊流程。
 5. 執行 `npm run reconcile:notion`（固定必跑，快速同步模式）。
-6. 若第 3 步有新連結被處理，再執行 `node scripts/mark-done.js`；沒有新連結則略過。
-7. 回覆本次整理結果（篇數、分類、失敗項目）。
+6. 若第 3 步有新連結被處理且已成功寫入 `*.md`，執行 `node scripts/clear-raw.js` 清除 `notes/_raw`。
+7. 若第 3 步有新連結被處理，再執行 `node scripts/mark-done.js`；沒有新連結則略過。
+8. 回覆本次整理結果（篇數、分類、失敗項目）。
 
 ### 同步補齊模式（`同步筆記` / `再次同步`）
 

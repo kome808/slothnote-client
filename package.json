@@ -18,7 +18,8 @@
         "reconcile:notion": "node scripts/reconcile-notion.js",
         "notion:sync:full": "NOTION_FULL_RECONCILE=1 node scripts/notion-sync.js",
         "notion:sync:rebuild": "NOTION_FULL_RECONCILE=1 NOTION_RECREATE_MISSING=1 node scripts/notion-sync.js",
-        "fetch:fulltext": "node scripts/fetch-fulltext.js"
+        "fetch:fulltext": "node scripts/fetch-fulltext.js",
+        "clean:raw": "node scripts/clear-raw.js"
     },
     "private": true
 }
