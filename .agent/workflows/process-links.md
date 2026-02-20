@@ -64,7 +64,7 @@ npm run fetch:fulltext -- "<url>"
 - 原文核心觀點（2-3 句）
 - 中文主題分類（動態）
 - 英文分類代碼（slug，例：`ai-trends`）
-- 標籤（3-5 個、中文）
+- 標籤（3-5 個，中文優先；專有名詞可保留原文）
 - 封面圖片網址（若可取得）
 
 #### 3c. 關聯筆記分析（摘要優先）
@@ -86,7 +86,6 @@ date: YYYY-MM-DD
 category: "ai-trends"
 category_zh: "AI 趨勢"
 tags: ["標籤1", "標籤2", "標籤3"]
-status: "unread"
 cover_image: "https://..."
 notion_synced: false
 ---

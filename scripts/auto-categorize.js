@@ -90,7 +90,6 @@ function buildMarkdown(frontmatter, body) {
     "subcategory_zh",
     "tags",
     "importance",
-    "status",
     "cover_image",
     "notion_synced",
   ];
@@ -104,7 +103,6 @@ function buildMarkdown(frontmatter, body) {
     category_zh: frontmatter.category_zh || "未分類",
     tags: frontmatter.tags || [],
     importance: Number(frontmatter.importance || 1),
-    status: frontmatter.status || "unread",
     notion_synced: Boolean(frontmatter.notion_synced),
   };
 

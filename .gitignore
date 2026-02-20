@@ -2,3 +2,9 @@ node_modules/
 .env.local
 .DS_Store
 Thumbs.db
+
+# 使用者筆記資料（保留在本機）
+notes/**
+!notes/
+!notes/_index.md
+!notes/_pending.json

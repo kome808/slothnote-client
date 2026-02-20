@@ -176,10 +176,6 @@ function getTags(page) {
   return tags.map((t) => String(t.name || "").trim()).filter(Boolean).join("、");
 }
 
-function getStatus(page) {
-  return page?.properties?.["狀態"]?.select?.name || "";
-}
-
 function notionPageUrlFromId(id) {
   return `https://www.notion.so/${String(id || "").replace(/-/g, "")}`;
 }
@@ -355,7 +351,6 @@ function buildCategoryMap(notes) {
       aiInsight: getAiInsight(note),
       summary: getSummary(note),
       tags: getTags(note),
-      status: getStatus(note),
     };
 
     const categoryNames = getCategoryNames(note);
@@ -504,7 +499,7 @@ async function updateCategoryPage(pageId, categoryName, rows) {
   const limitedRows = rows.slice(0, MAX_PER_CATEGORY_ROWS);
   const pages = chunkRows(limitedRows, CATEGORY_PAGE_SIZE);
 
-  const tableHeader = makeTableRow(["標題", "AI 洞察", "來源", "分類", "摘要", "收集日期", "標籤", "狀態"]);
+  const tableHeader = makeTableRow(["標題", "AI 洞察", "來源", "分類", "摘要", "收集日期", "標籤"]);
   await appendChildren(pageId, [makeParagraph("以下用表格分頁列出本分類文章（每頁 20 筆）")]);
   for (let i = 0; i < pages.length; i += 1) {
     const pageRows = pages[i];
@@ -518,10 +513,9 @@ async function updateCategoryPage(pageId, categoryName, rows) {
         truncateText(row.summary, 46),
         row.collectionDate || "",
         truncateText(row.tags, 36),
-        row.status || "",
       ]));
     }
-    await appendTablePage(pageId, 8, tableHeader, tableRows, i + 1, pages.length);
+    await appendTablePage(pageId, 7, tableHeader, tableRows, i + 1, pages.length);
   }
   return updateSummary;
 }

@@ -184,7 +184,6 @@ function buildMarkdown(frontmatter, body) {
     "category_zh",
     "tags",
     "importance",
-    "status",
     "cover_image",
     "notion_synced",
   ];
@@ -198,9 +197,10 @@ function buildMarkdown(frontmatter, body) {
     category_zh: frontmatter.category_zh || "未分類",
     tags: frontmatter.tags || [],
     importance: Number(frontmatter.importance || 1),
-    status: frontmatter.status || "unread",
     notion_synced: Boolean(frontmatter.notion_synced),
   };
+
+  delete normalized.status;
 
   const lines = ["---"];
   const included = new Set();
@@ -217,23 +217,6 @@ function buildMarkdown(frontmatter, body) {
   return `${lines.join("\n")}\n${body.startsWith("\n") ? body : `\n${body}`}`;
 }
 
-
-function normalizeStatus(status) {
-  const map = {
-    unread: "未讀",
-    read: "已讀",
-    extended: "已延伸",
-    "未讀": "未讀",
-    "已讀": "已讀",
-    "已延伸": "已延伸",
-  };
-  return map[status] || "未讀";
-}
-
-function normalizeImportance(importance) {
-  const n = Math.max(1, Math.min(3, Number(importance || 1)));
-  return "⭐".repeat(n);
-}
 
 const CATEGORY_ZH_MAP = {
   "ai-trends": "AI 趨勢",
@@ -475,7 +458,6 @@ function buildPagePayload(frontmatter, body) {
         multi_select: tags.map((tag) => ({ name: String(tag).slice(0, 100) })),
       },
       "收集日期": { date: { start: String(frontmatter.date || "").slice(0, 10) || null } },
-      "狀態": { select: { name: normalizeStatus(frontmatter.status) } },
       "AI 洞察": {
         rich_text: insight
           ? [{ text: { content: insight.slice(0, 2000) } }]
