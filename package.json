@@ -14,7 +14,8 @@
         "organize": "node scripts/pull-pending.js && echo '請在 AI 對話輸入：整理筆記'",
         "bundle:client": "node scripts/bundle-client.js",
         "sync:client": "node scripts/sync-client-repo.js",
-        "publish:dual": "node scripts/publish-dual-repos.js"
+        "publish:dual": "node scripts/publish-dual-repos.js",
+        "reconcile:notion": "node scripts/reconcile-notion.js"
     },
     "private": true
 }

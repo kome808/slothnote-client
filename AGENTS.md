@@ -25,16 +25,15 @@
 1. 執行 `node scripts/pull-pending.js` 拉取待處理連結。
 2. 讀取 `notes/_pending.json`。
 3. 若清單有連結：逐篇整理（擷取內容、摘要、分類、關聯洞察）並寫入 `notes/{category}/YYYY-MM-DD-{slug}.md`。
-4. 若清單為空：不要結束，仍要繼續做本機與 Notion 一致性補齊。
-5. 更新 `notes/_index.md`。
-6. 執行 `node scripts/auto-categorize.js`。
-7. 若第 3 步有新連結被處理，再執行 `node scripts/mark-done.js`；沒有新連結則略過。
-8. 一律執行 `npm run notion:sync`，用途：
-   - 比對本機 `notes/` 與 Notion
-   - 補上 Notion 缺漏筆記頁
-   - 回填既有頁面的欄位（摘要/標籤/狀態/AI 洞察/原始連結）
-   - 更新分類頁（預設表格）
-9. 回覆本次整理結果（篇數、分類、失敗項目）。
+4. 若清單為空：不要結束，必須繼續執行補齊流程。
+5. 執行 `npm run reconcile:notion`（固定必跑）。
+6. 若第 3 步有新連結被處理，再執行 `node scripts/mark-done.js`；沒有新連結則略過。
+7. 回覆本次整理結果（篇數、分類、失敗項目）。
+
+## 強制規則
+
+- 禁止只回覆「目前沒有待整理連結」就結束任務。
+- 只要使用者輸入「整理筆記」，就必須完成本機↔Notion 一致性補齊。
 
 ## Token 節省規則（摘要優先）
 
