@@ -29,7 +29,7 @@
 
 1. 執行 `node scripts/pull-pending.js` 拉取待處理連結。
 2. 讀取 `notes/_pending.json`。
-3. 若清單有連結：逐篇整理（擷取內容、摘要、分類、關聯洞察）並寫入 `notes/{category}/YYYY-MM-DD-{slug}.md`。
+3. 若清單有連結：每篇先執行 `npm run fetch:fulltext -- <url>` 抓整頁素材，再整理（摘要、分類、關聯洞察）並寫入 `notes/{category}/YYYY-MM-DD-{slug}.md`。
 4. 若清單為空：不要結束，必須繼續執行補齊流程。
 5. 執行 `npm run reconcile:notion`（固定必跑，快速同步模式）。
 6. 若第 3 步有新連結被處理，再執行 `node scripts/mark-done.js`；沒有新連結則略過。
@@ -50,7 +50,7 @@
 
 ## Token 節省規則（摘要優先）
 
-- 比對歷史筆記時，先讀 frontmatter + `## 一句話摘要` + `## 關鍵重點`。
+- 比對歷史筆記時，先讀 frontmatter + `## 摘要` + `## 關鍵重點`。
 - 只有在高相關候選需要更深分析時，才讀取全文。
 - 全文讀取數量依相關性動態調整，不設固定篇數上限。
 

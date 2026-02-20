@@ -6,7 +6,7 @@
 
 1. `node scripts/pull-pending.js`
 2. 讀取 `notes/_pending.json`
-3. 若有新連結：逐篇整理並寫入 `notes/`
+3. 若有新連結：先 `npm run fetch:fulltext -- <url>` 抓整頁內容，再逐篇整理並寫入 `notes/`
 4. 不論是否有新連結，皆必須執行：`npm run reconcile:notion`
 5. 若有處理新連結，且確認檔案已寫入 `notes/`，再執行：`node scripts/mark-done.js`
 

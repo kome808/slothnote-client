@@ -443,8 +443,8 @@ async function replaceFullContentSection(pageId, body) {
 }
 
 function buildPagePayload(frontmatter, body) {
-  const summary = extractSection(body, "一句話摘要");
-  const insightRaw = extractSection(body, "AI 洞察") || extractSection(body, "AI洞察");
+  const summary = extractSectionAny(body, ["摘要", "一句話摘要"]);
+  const insightRaw = extractSectionAny(body, ["AI 洞察", "AI洞察", "洞察"]);
   const insight = insightRaw || (summary ? `延伸自摘要：${summary}` : "");
   const title = frontmatter.title || "未命名筆記";
   const tags = normalizeTags(frontmatter.tags);

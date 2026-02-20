@@ -61,6 +61,7 @@ npm run setup:start
 
 - `npm run setup:start`：重新配對與本機設定
 - `node scripts/pull-pending.js`：手動抓待處理連結
+- `npm run fetch:fulltext -- <url>`：先抓取整頁全文素材（給 LLM 判斷主文）
 - `npm run notion:sync`：手動觸發 Notion 同步
 
 ## 注意事項
