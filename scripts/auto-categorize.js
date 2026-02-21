@@ -8,8 +8,16 @@ const path = require("path");
 
 const ROOT = path.join(__dirname, "..");
 const NOTES_DIR = path.join(ROOT, "notes");
+const CATEGORIZE_STATE_PATH = path.join(ROOT, "config", "auto-categorize-state.json");
 const TOP_LEVEL_MAX = 12;
 const TOP_LEVEL_RESERVED_OTHERS = "其他主題";
+
+const FULL_TRIGGER_TOTAL_NOTES = Number(process.env.AUTO_CATEGORIZE_FULL_TOTAL || 120);
+const FULL_TRIGGER_NEW_NOTES = Number(process.env.AUTO_CATEGORIZE_FULL_NEW || 20);
+const FULL_TRIGGER_NEW_RATIO = Number(process.env.AUTO_CATEGORIZE_FULL_RATIO || 0.2);
+const FULL_TRIGGER_DAYS = Number(process.env.AUTO_CATEGORIZE_FULL_DAYS || 7);
+const CATEGORY_ANALYZE_THRESHOLD = Number(process.env.AUTO_CATEGORIZE_CATEGORY_THRESHOLD || 80);
+const FORCE_FULL = process.env.AUTO_CATEGORIZE_FORCE_FULL === "1";
 
 function walkMarkdownFiles(dir) {
   const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -264,6 +272,77 @@ function buildTaxonomy(records) {
   };
 }
 
+function readCategorizeState() {
+  if (!fs.existsSync(CATEGORIZE_STATE_PATH)) {
+    return { lastFullAt: "", lastRunAt: "", totalNotes: 0, lastNewCount: 0 };
+  }
+  try {
+    const raw = JSON.parse(fs.readFileSync(CATEGORIZE_STATE_PATH, "utf8"));
+    return {
+      lastFullAt: String(raw.lastFullAt || ""),
+      lastRunAt: String(raw.lastRunAt || ""),
+      totalNotes: Number(raw.totalNotes || 0),
+      lastNewCount: Number(raw.lastNewCount || 0),
+    };
+  } catch {
+    return { lastFullAt: "", lastRunAt: "", totalNotes: 0, lastNewCount: 0 };
+  }
+}
+
+function writeCategorizeState(next) {
+  const payload = {
+    lastFullAt: next.lastFullAt || "",
+    lastRunAt: next.lastRunAt || new Date().toISOString(),
+    totalNotes: Number(next.totalNotes || 0),
+    lastNewCount: Number(next.lastNewCount || 0),
+  };
+  fs.writeFileSync(CATEGORIZE_STATE_PATH, JSON.stringify(payload, null, 2), "utf8");
+}
+
+function daysSince(iso) {
+  if (!iso) return Infinity;
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return Infinity;
+  return (Date.now() - t) / (1000 * 60 * 60 * 24);
+}
+
+function categoryNameForStats(frontmatter) {
+  const zh = normalizeCategoryName(frontmatter.category_zh);
+  if (zh && zh !== "未分類") return zh;
+  const raw = normalizeCategoryName(frontmatter.category);
+  if (raw && raw !== "uncategorized" && !isMachineCategoryId(raw)) return raw;
+  return "未分類";
+}
+
+function shouldRunFullRecategorize(totalNotes, newCount, state, maxCategoryCount) {
+  if (FORCE_FULL) {
+    return { full: true, reasons: ["force_full"] };
+  }
+
+  const reasons = [];
+  const newRatio = totalNotes > 0 ? newCount / totalNotes : 0;
+  const quantityGate = totalNotes >= FULL_TRIGGER_TOTAL_NOTES || maxCategoryCount >= CATEGORY_ANALYZE_THRESHOLD;
+
+  if (!quantityGate) {
+    return { full: false, reasons: [] };
+  }
+
+  if (totalNotes >= FULL_TRIGGER_TOTAL_NOTES && newCount >= FULL_TRIGGER_NEW_NOTES) {
+    reasons.push("total_and_new_threshold");
+  }
+  if (newRatio >= FULL_TRIGGER_NEW_RATIO) {
+    reasons.push("new_ratio_threshold");
+  }
+  if (daysSince(state.lastFullAt) >= FULL_TRIGGER_DAYS) {
+    reasons.push("days_since_last_full");
+  }
+  if (maxCategoryCount >= CATEGORY_ANALYZE_THRESHOLD) {
+    reasons.push("category_size_threshold");
+  }
+
+  return { full: reasons.length > 0, reasons };
+}
+
 function resolveCategoryPlacement(proposedZh, taxonomy) {
   if (taxonomy.topBaseNames.includes(proposedZh)) {
     return { primaryZh: proposedZh, secondaryZh: "" };
@@ -292,18 +371,45 @@ function resolveCategoryPlacement(proposedZh, taxonomy) {
 
 function main() {
   const files = walkMarkdownFiles(NOTES_DIR);
-  const records = files.map((filePath) => {
+  const parsed = files.map((filePath) => {
     const raw = fs.readFileSync(filePath, "utf8");
     const { frontmatter, body } = parseFrontmatter(raw);
-    const proposedZh = detectCategoryName(frontmatter, body);
-    return { filePath, frontmatter, body, proposedZh };
+    return { filePath, frontmatter, body };
+  });
+
+  const totalNotes = parsed.length;
+  const targetRecords = parsed.filter((r) => r.frontmatter.notion_synced !== true);
+  const newCount = targetRecords.length;
+
+  const categoryCountMap = new Map();
+  for (const row of parsed) {
+    const name = categoryNameForStats(row.frontmatter);
+    categoryCountMap.set(name, (categoryCountMap.get(name) || 0) + 1);
+  }
+  const maxCategoryCount = categoryCountMap.size
+    ? Math.max(...Array.from(categoryCountMap.values()))
+    : 0;
+
+  const state = readCategorizeState();
+  const fullDecision = shouldRunFullRecategorize(totalNotes, newCount, state, maxCategoryCount);
+  const runFull = fullDecision.full;
+
+  const records = parsed.map((r) => {
+    const proposedZh = runFull
+      ? detectCategoryName(r.frontmatter, r.body)
+      : (r.frontmatter.notion_synced !== true
+          ? detectCategoryName(r.frontmatter, r.body)
+          : detectCategoryName(r.frontmatter, ""));
+    return { ...r, proposedZh };
   });
 
   const taxonomy = buildTaxonomy(records);
   let moved = 0;
   let updated = 0;
 
-  for (const record of records) {
+  const applyTargets = runFull ? records : records.filter((r) => r.frontmatter.notion_synced !== true);
+
+  for (const record of applyTargets) {
     const { filePath, frontmatter, body, proposedZh } = record;
     const placement = resolveCategoryPlacement(proposedZh, taxonomy);
 
@@ -351,10 +457,24 @@ function main() {
   }
 
   const topLevelCount = taxonomy.topBaseNames.length + (taxonomy.hasOverflowBucket ? 1 : 0);
+  const now = new Date().toISOString();
+  writeCategorizeState({
+    lastFullAt: runFull ? now : state.lastFullAt,
+    lastRunAt: now,
+    totalNotes,
+    lastNewCount: newCount,
+  });
+
   console.log("✅ 動態重分類完成");
+  console.log(`- 模式：${runFull ? "全量" : "增量（只處理本次新增）"}`);
+  if (runFull) {
+    console.log(`- 全量觸發原因：${fullDecision.reasons.join(", ")}`);
+  }
+  console.log(`- 總筆記數：${totalNotes}`);
+  console.log(`- 最大分類筆數：${maxCategoryCount}`);
+  console.log(`- 本次新增：${newCount}`);
   console.log(`- 第一層分類數：${topLevelCount}`);
   console.log(`- 檔案移動：${moved}`);
   console.log(`- 內容更新：${updated}`);
 }
-
 main();

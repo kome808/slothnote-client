@@ -48,6 +48,8 @@ let runtimeParentPageId = "";
 let useDataSource = Boolean(notionDataSourceId && !isPlaceholder(notionDataSourceId));
 const FULL_RECONCILE = process.env.NOTION_FULL_RECONCILE === "1";
 const RECREATE_MISSING = process.env.NOTION_RECREATE_MISSING === "1";
+const RUN_AUTO_CATEGORIZE_IN_SYNC = process.env.NOTION_SYNC_AUTO_CATEGORIZE === "1";
+const FORCE_CATEGORY_REFRESH = process.env.NOTION_FORCE_CATEGORY_REFRESH === "1";
 
 function isPlaceholder(value) {
   return !value || String(value).includes("replace-with-");
@@ -481,13 +483,15 @@ async function syncFile(filePath) {
   }
 
   const originalUrl = resolveOriginalUrl(frontmatter);
+
+  if (frontmatter.notion_synced === true && !FULL_RECONCILE) {
+    // Fast path: already synced note in non-reconcile mode; skip remote lookup.
+    return { skipped: true, filePath, reason: "already_synced" };
+  }
+
   const existing = await findPageByUrl(originalUrl);
 
   if (frontmatter.notion_synced === true) {
-    if (!FULL_RECONCILE) {
-      return { skipped: true, filePath, reason: "already_synced" };
-    }
-
     if (existing) {
       const payload = buildPagePayload(frontmatter, body);
       await notionRequest(`pages/${existing.id}`, "PATCH", {
@@ -537,12 +541,14 @@ async function main() {
     process.exit(1);
   }
 
-  // 先做本地重分類，確保既有資料會移動到較合適的分類
-  const recategorize = spawnSync(process.execPath, [path.join(__dirname, "auto-categorize.js")], {
-    stdio: "inherit",
-  });
-  if (recategorize.status !== 0) {
-    console.warn("⚠️ 自動重分類未成功完成，仍繼續進行 Notion 同步。");
+  // 避免與 reconcile-notion 重複重分類：預設在 sync 階段不跑。
+  if (RUN_AUTO_CATEGORIZE_IN_SYNC) {
+    const recategorize = spawnSync(process.execPath, [path.join(__dirname, "auto-categorize.js")], {
+      stdio: "inherit",
+    });
+    if (recategorize.status !== 0) {
+      console.warn("⚠️ 自動重分類未成功完成，仍繼續進行 Notion 同步。");
+    }
   }
 
   if (!fs.existsSync(NOTES_DIR)) {
@@ -599,26 +605,30 @@ async function main() {
   console.log(`- 已同步：${synced}`);
   console.log(`- 已略過：${skipped}`);
 
-  // 自動更新「文章分類」頁面架構
+  // 自動更新「文章分類」頁面架構（僅當有變動時刷新，可大幅降低耗時）
   const mapping = loadMapping();
   const parentPageId = process.env.NOTION_PARENT_PAGE_ID || runtimeParentPageId || mapping.parentPageId;
   if (parentPageId) {
-    const categoryRefresh = spawnSync(
-      process.execPath,
-      [path.join(__dirname, "notion-refresh-categories.js")],
-      {
-        stdio: "inherit",
-        env: {
-          ...process.env,
-          NOTION_TOKEN: notionToken,
-          NOTION_DATABASE_ID: notionDatabaseId,
-          NOTION_DATA_SOURCE_ID: notionDataSourceId || "",
-          NOTION_PARENT_PAGE_ID: parentPageId,
-        },
+    if (synced > 0 || FORCE_CATEGORY_REFRESH) {
+      const categoryRefresh = spawnSync(
+        process.execPath,
+        [path.join(__dirname, "notion-refresh-categories.js")],
+        {
+          stdio: "inherit",
+          env: {
+            ...process.env,
+            NOTION_TOKEN: notionToken,
+            NOTION_DATABASE_ID: notionDatabaseId,
+            NOTION_DATA_SOURCE_ID: notionDataSourceId || "",
+            NOTION_PARENT_PAGE_ID: parentPageId,
+          },
+        }
+      );
+      if (categoryRefresh.status !== 0) {
+        console.warn(`⚠️ Notion 分類頁更新失敗（exit=${categoryRefresh.status}），請查看上方錯誤訊息。`);
       }
-    );
-    if (categoryRefresh.status !== 0) {
-      console.warn(`⚠️ Notion 分類頁更新失敗（exit=${categoryRefresh.status}），請查看上方錯誤訊息。`);
+    } else {
+      console.log("ℹ️ 本次無新增/更新筆記，略過分類頁刷新以加速。若要強制刷新可設定 NOTION_FORCE_CATEGORY_REFRESH=1。");
     }
   } else {
     console.log("ℹ️ 未設定 parentPageId，略過 Notion 分類頁更新。");

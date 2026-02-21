@@ -8,3 +8,6 @@ notes/**
 !notes/
 !notes/_index.md
 !notes/_pending.json
+
+# Runtime categorize state
+config/auto-categorize-state.json
