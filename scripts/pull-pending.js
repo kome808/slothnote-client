@@ -3,14 +3,39 @@
  * 從 Cloudflare Worker 拉取待處理項目（url + file），並寫入 notes/_pending.json
  * 檔案項目會先下載到 notes/_inbox/files/
  *
- * 用法：WORKER_BASE_URL=... WORKER_CLIENT_API_KEY=... node scripts/pull-pending.js
+ * 支援：
+ * - 一般使用者：WORKER_CLIENT_API_KEY（走 /client/*）
+ * - 管理端測試：WORKER_INTERNAL_API_KEY（走 /internal/*）
  */
 
 const fs = require("fs");
 const path = require("path");
 
+function loadEnvLocal() {
+  const envPath = path.join(__dirname, "..", ".env.local");
+  if (!fs.existsSync(envPath)) return;
+  const raw = fs.readFileSync(envPath, "utf8");
+  for (const line of raw.split("\n")) {
+    const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/);
+    if (!m) continue;
+    const key = m[1];
+    if (process.env[key]) continue;
+    let val = m[2] || "";
+    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+      val = val.slice(1, -1);
+    }
+    process.env[key] = val;
+  }
+}
+
+loadEnvLocal();
+
 const workerBaseUrl = process.env.WORKER_BASE_URL;
-const workerApiKey = process.env.WORKER_CLIENT_API_KEY;
+const workerClientApiKey = process.env.WORKER_CLIENT_API_KEY;
+const workerInternalApiKey = process.env.WORKER_INTERNAL_API_KEY;
+const authKey = workerClientApiKey || workerInternalApiKey;
+const useClientApi = Boolean(workerClientApiKey);
+const authHeaderName = useClientApi ? "x-client-key" : "x-api-key";
 let lineUserId = process.env.LINE_USER_ID;
 
 if (!workerBaseUrl) {
@@ -18,8 +43,8 @@ if (!workerBaseUrl) {
   process.exit(1);
 }
 
-if (!workerApiKey) {
-  console.error("❌ 缺少 WORKER_CLIENT_API_KEY");
+if (!authKey) {
+  console.error("❌ 缺少 WORKER_CLIENT_API_KEY 或 WORKER_INTERNAL_API_KEY");
   process.exit(1);
 }
 
@@ -51,10 +76,11 @@ function sanitizeFileName(input) {
 }
 
 async function inferLineUserId() {
-  const response = await fetch(`${workerBaseUrl.replace(/\/$/, "")}/client/bootstrap-line-user`, {
+  const endpoint = useClientApi ? "/client/bootstrap-line-user" : "/internal/bootstrap-line-user";
+  const response = await fetch(`${workerBaseUrl.replace(/\/$/, "")}${endpoint}`, {
     method: "GET",
     headers: {
-      "x-client-key": workerApiKey,
+      [authHeaderName]: authKey,
     },
   });
   if (!response.ok) {
@@ -72,13 +98,14 @@ async function inferLineUserId() {
 }
 
 async function fetchPendingItems() {
-  const url = new URL(`${workerBaseUrl.replace(/\/$/, "")}/client/pending`);
+  const endpoint = useClientApi ? "/client/pending" : "/internal/pending";
+  const url = new URL(`${workerBaseUrl.replace(/\/$/, "")}${endpoint}`);
   if (lineUserId) url.searchParams.set("line_user_id", lineUserId);
 
   const response = await fetch(url.toString(), {
     method: "GET",
     headers: {
-      "x-client-key": workerApiKey,
+      [authHeaderName]: authKey,
     },
   });
 
@@ -96,11 +123,14 @@ async function fetchPendingItems() {
 }
 
 async function requestFileDownload(fileId) {
-  const url = `${workerBaseUrl.replace(/\/$/, "")}/client/file-download/${encodeURIComponent(fileId)}`;
-  const response = await fetch(url, {
+  const prefix = useClientApi ? "/client/file-download/" : "/internal/file-download/";
+  const url = new URL(`${workerBaseUrl.replace(/\/$/, "")}${prefix}${encodeURIComponent(fileId)}`);
+  if (lineUserId) url.searchParams.set("line_user_id", lineUserId);
+
+  const response = await fetch(url.toString(), {
     method: "GET",
     headers: {
-      "x-client-key": workerApiKey,
+      [authHeaderName]: authKey,
       ...(lineUserId ? { "x-line-user-id": lineUserId } : {}),
     },
   });

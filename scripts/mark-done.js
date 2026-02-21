@@ -3,13 +3,40 @@
  * 將 notes/_pending.json 中已處理項目標記為完成
  * - url 項目：可直接標記
  * - file 項目：需要 local_file_path 存在，且會帶 processed_file_ids
+ *
+ * 支援：
+ * - 一般使用者：WORKER_CLIENT_API_KEY（走 /client/*）
+ * - 管理端測試：WORKER_INTERNAL_API_KEY（走 /internal/*）
  */
 
 const fs = require("fs");
 const path = require("path");
 
+function loadEnvLocal() {
+  const envPath = path.join(__dirname, "..", ".env.local");
+  if (!fs.existsSync(envPath)) return;
+  const raw = fs.readFileSync(envPath, "utf8");
+  for (const line of raw.split("\n")) {
+    const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/);
+    if (!m) continue;
+    const key = m[1];
+    if (process.env[key]) continue;
+    let val = m[2] || "";
+    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+      val = val.slice(1, -1);
+    }
+    process.env[key] = val;
+  }
+}
+
+loadEnvLocal();
+
 const workerBaseUrl = process.env.WORKER_BASE_URL;
-const workerApiKey = process.env.WORKER_CLIENT_API_KEY;
+const workerClientApiKey = process.env.WORKER_CLIENT_API_KEY;
+const workerInternalApiKey = process.env.WORKER_INTERNAL_API_KEY;
+const authKey = workerClientApiKey || workerInternalApiKey;
+const useClientApi = Boolean(workerClientApiKey);
+const authHeaderName = useClientApi ? "x-client-key" : "x-api-key";
 let lineUserId = process.env.LINE_USER_ID;
 
 if (!workerBaseUrl) {
@@ -17,8 +44,8 @@ if (!workerBaseUrl) {
   process.exit(1);
 }
 
-if (!workerApiKey) {
-  console.error("❌ 缺少 WORKER_CLIENT_API_KEY");
+if (!authKey) {
+  console.error("❌ 缺少 WORKER_CLIENT_API_KEY 或 WORKER_INTERNAL_API_KEY");
   process.exit(1);
 }
 
@@ -36,10 +63,11 @@ function upsertEnvLocalLineUserId(value) {
 }
 
 async function inferLineUserId() {
-  const response = await fetch(`${workerBaseUrl.replace(/\/$/, "")}/client/bootstrap-line-user`, {
+  const endpoint = useClientApi ? "/client/bootstrap-line-user" : "/internal/bootstrap-line-user";
+  const response = await fetch(`${workerBaseUrl.replace(/\/$/, "")}${endpoint}`, {
     method: "GET",
     headers: {
-      "x-client-key": workerApiKey,
+      [authHeaderName]: authKey,
     },
   });
   if (!response.ok) {
@@ -93,14 +121,16 @@ async function markDone() {
 
   console.log(`🔄 標記 ${ids.length} 個項目為已完成...\n`);
 
-  const response = await fetch(`${workerBaseUrl.replace(/\/$/, "")}/client/mark-done`, {
+  const endpoint = useClientApi ? "/client/mark-done" : "/internal/mark-done";
+  const response = await fetch(`${workerBaseUrl.replace(/\/$/, "")}${endpoint}`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "x-client-key": workerApiKey,
+      [authHeaderName]: authKey,
     },
     body: JSON.stringify({
       ids,
+      line_user_id: lineUserId,
       processed_file_ids: processedFileIds,
     }),
   });
