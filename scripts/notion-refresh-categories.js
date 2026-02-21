@@ -13,6 +13,7 @@ const fs = require("fs");
 const path = require("path");
 
 const ROOT = path.join(__dirname, "..");
+const NOTES_DIR = path.join(ROOT, "notes");
 const MAPPING_PATH = path.join(ROOT, "config", "notion-mapping.json");
 const LEGACY_NOTION_VERSION = "2022-06-28";
 const MODERN_NOTION_VERSION = "2025-09-03";
@@ -208,7 +209,160 @@ function normalizeCategoryName(name) {
   return CATEGORY_ZH_MAP[key] || "未分類";
 }
 
-function buildCategoryInsightBlocks(rows) {
+function walkMarkdownFiles(dir) {
+  if (!fs.existsSync(dir)) return [];
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    if (entry.name.startsWith("_")) continue;
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...walkMarkdownFiles(fullPath));
+      continue;
+    }
+    if (entry.isFile() && entry.name.endsWith(".md")) {
+      files.push(fullPath);
+    }
+  }
+  return files;
+}
+
+function parseFrontmatter(content) {
+  if (!content.startsWith("---\n")) return { frontmatter: {}, body: content };
+  const end = content.indexOf("\n---\n", 4);
+  if (end === -1) return { frontmatter: {}, body: content };
+
+  const raw = content.slice(4, end).trim();
+  const body = content.slice(end + 5);
+  const frontmatter = {};
+
+  for (const line of raw.split("\n")) {
+    const sep = line.indexOf(":");
+    if (sep === -1) continue;
+    const key = line.slice(0, sep).trim();
+    const value = line.slice(sep + 1).trim();
+    if (!key) continue;
+
+    if (value.startsWith("[") && value.endsWith("]")) {
+      try {
+        frontmatter[key] = JSON.parse(value);
+      } catch {
+        frontmatter[key] = [];
+      }
+      continue;
+    }
+
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      frontmatter[key] = value.slice(1, -1);
+    } else {
+      frontmatter[key] = value;
+    }
+  }
+
+  return { frontmatter, body };
+}
+
+function extractSectionAny(body, headings) {
+  for (const heading of headings) {
+    const pattern = new RegExp(`^##\\s+${heading}\\n([\\s\\S]*?)(?=^##\\s+|$)`, "m");
+    const match = String(body || "").match(pattern);
+    if (match && match[1] && match[1].trim()) {
+      return match[1].trim();
+    }
+  }
+  return "";
+}
+
+function loadManualCategoryInsights() {
+  const map = new Map();
+  const files = walkMarkdownFiles(NOTES_DIR);
+
+  for (const filePath of files) {
+    const raw = fs.readFileSync(filePath, "utf8");
+    const { frontmatter, body } = parseFrontmatter(raw);
+    const source = String(frontmatter.source || "").trim().toLowerCase();
+    if (source !== "insight") continue;
+
+    const categoryName = normalizeCategoryName(frontmatter.category_zh || frontmatter.category || "未分類");
+    const summary = extractSectionAny(body, ["摘要", "一句話摘要"]);
+    const insight = extractSectionAny(body, ["分類整合洞察", "整合洞察", "AI 洞察", "AI洞察", "洞察"]);
+    if (!summary && !insight) continue;
+
+    const date = String(frontmatter.date || "").slice(0, 10) || "";
+    const title = String(frontmatter.title || "").trim() || "手寫洞察";
+    const score = date ? Date.parse(date) || 0 : fs.statSync(filePath).mtimeMs || 0;
+
+    const existing = map.get(categoryName);
+    if (!existing || score >= existing.score) {
+      map.set(categoryName, { title, date, summary, insight, score });
+    }
+  }
+
+  return map;
+}
+
+function buildInsightMarkdownBlocks(text) {
+  const lines = String(text || "").replace(/\r\n/g, "\n").split("\n");
+  const blocks = [];
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    if (line.startsWith("### ")) {
+      blocks.push({
+        object: "block",
+        type: "heading_3",
+        heading_3: { rich_text: [textItem(line.slice(4).trim() || " ")] },
+      });
+      continue;
+    }
+    if (line.startsWith("## ")) {
+      blocks.push({
+        object: "block",
+        type: "heading_3",
+        heading_3: { rich_text: [textItem(line.slice(3).trim() || " ")] },
+      });
+      continue;
+    }
+    if (/^[-*]\s+/.test(line)) {
+      blocks.push(makeBulletedItem(line.replace(/^[-*]\s+/, "")));
+      continue;
+    }
+    if (/^\d+\.\s+/.test(line)) {
+      blocks.push({
+        object: "block",
+        type: "numbered_list_item",
+        numbered_list_item: { rich_text: [textItem(line.replace(/^\d+\.\s+/, ""))] },
+      });
+      continue;
+    }
+    blocks.push(makeParagraph(line));
+  }
+  return blocks;
+}
+
+function normalizeCategoryPageTitle(title) {
+  return String(title || "")
+    .replace(/（\d+）$/, "")
+    .replace(/\(\d+\)$/, "")
+    .replace(/（表格）$/, "")
+    .trim();
+}
+
+
+function buildCategoryInsightBlocks(rows, manualInsight) {
+  if (manualInsight && (manualInsight.summary || manualInsight.insight)) {
+    const titleLine = manualInsight.date
+      ? `洞察來源：${manualInsight.title}（${manualInsight.date}）`
+      : `洞察來源：${manualInsight.title}`;
+    return [
+      makeHeading("分類整合洞察"),
+      makeParagraph(titleLine),
+      ...(manualInsight.summary ? [makeParagraph(`摘要：${manualInsight.summary}`)] : []),
+      ...buildInsightMarkdownBlocks(manualInsight.insight || ""),
+    ];
+  }
+
   if (!rows.length) {
     return [makeParagraph("目前尚無內容，待新文章同步後再產生洞察。")];
   }
@@ -352,11 +506,16 @@ function buildCategoryMap(notes) {
   const categoryMap = new Map();
 
   for (const note of notes) {
+    const sourceName = String(note?.properties?.["來源"]?.select?.name || "web").trim();
+    if (sourceName.toLowerCase() === "insight") {
+      continue;
+    }
+
     const row = {
       id: note.id,
       title: getTitleFromPage(note),
       url: note.url || notionPageUrlFromId(note.id),
-      source: note?.properties?.["來源"]?.select?.name || "web",
+      source: sourceName || "web",
       collectionDate: getCollectionDate(note),
       aiInsight: getAiInsight(note),
       summary: getSummary(note),
@@ -489,7 +648,7 @@ async function appendTablePage(pageId, tableWidth, headerRow, dataRows, pageNo, 
   await appendChildren(pageId, blocks);
 }
 
-async function updateCategoryPage(pageId, categoryName, rows) {
+async function updateCategoryPage(pageId, categoryName, rows, manualInsight) {
   await archiveAllChildren(pageId);
 
   const latest = rows[0] || null;
@@ -501,7 +660,7 @@ async function updateCategoryPage(pageId, categoryName, rows) {
     makeHeading(`分類：${categoryName}（${rows.length}）`),
     makeParagraph(`資料筆數：${rows.length}`),
     makeParagraph(`更新內容：${updateSummary}`),
-    ...buildCategoryInsightBlocks(rows),
+    ...buildCategoryInsightBlocks(rows, manualInsight),
   ];
 
   await appendChildren(pageId, header);
@@ -563,6 +722,7 @@ async function main() {
   console.log(`INFO category refresh database_id: ${databaseId}`);
   const notes = await queryAllNotes();
   const categoryMap = buildCategoryMap(notes);
+  const manualInsights = loadManualCategoryInsights();
   const legacyRoot = await findChildPageByTitle(parentPageId, "文章分類");
   if (legacyRoot) {
     await archiveBlock(legacyRoot.id);
@@ -587,7 +747,7 @@ async function main() {
     if (legacyTablePage) {
       await archiveBlock(legacyTablePage.id);
     }
-    await updateCategoryPage(pageId, categoryName, rows);
+    await updateCategoryPage(pageId, categoryName, rows, manualInsights.get(categoryName) || null);
   }
 
   console.log("✅ Notion 動態分類頁已更新");

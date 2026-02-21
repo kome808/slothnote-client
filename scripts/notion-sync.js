@@ -470,6 +470,16 @@ function buildPagePayload(frontmatter, body) {
 async function syncFile(filePath) {
   const raw = fs.readFileSync(filePath, "utf8");
   const { frontmatter, body } = parseFrontmatter(raw);
+
+  const sourceType = String(frontmatter.source || "").trim().toLowerCase();
+  if (sourceType === "insight") {
+    if (frontmatter.notion_synced !== true) {
+      frontmatter.notion_synced = true;
+      fs.writeFileSync(filePath, buildMarkdown(frontmatter, body), "utf8");
+    }
+    return { skipped: true, filePath, reason: "insight_embed_only" };
+  }
+
   const originalUrl = resolveOriginalUrl(frontmatter);
   const existing = await findPageByUrl(originalUrl);
 
